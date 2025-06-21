@@ -6,12 +6,13 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	probing "github.com/prometheus-community/pro-bing"
 )
 
 // Monitor handles site monitoring
@@ -156,7 +157,7 @@ func (m *Monitor) checkHTTPSite(ctx context.Context, site *Site) CheckResult {
 	return result
 }
 
-// checkPingSite checks a ping:// site
+// checkPingSite checks a ping:// site using native ICMP ping
 func (m *Monitor) checkPingSite(ctx context.Context, site *Site) CheckResult {
 	start := time.Now()
 	result := CheckResult{
@@ -168,36 +169,66 @@ func (m *Monitor) checkPingSite(ctx context.Context, site *Site) CheckResult {
 	// Extract hostname from ping://hostname
 	host := strings.TrimPrefix(site.URL, "ping://")
 
-	// Create ping command with timeout
-	var cmd *exec.Cmd
-	if isWindows() {
-		cmd = exec.CommandContext(ctx, "ping", "-n", "1", "-w", "5000", host)
-	} else {
-		cmd = exec.CommandContext(ctx, "ping", "-c", "1", "-W", "5", host)
-	}
-
-	output, err := cmd.Output()
-	responseTime := time.Since(start).Seconds()
-	result.ResponseTime = &responseTime
-
+	// Create pinger
+	pinger, err := probing.NewPinger(host)
 	if err != nil {
-		errMsg := fmt.Sprintf("Ping failed: %v", err)
+		errMsg := fmt.Sprintf("Failed to create pinger: %v", err)
 		result.ErrorMessage = &errMsg
+		responseTime := time.Since(start).Seconds()
+		result.ResponseTime = &responseTime
 		return result
 	}
 
-	// Try to extract actual ping time from output
-	outputStr := string(output)
-	timeRegex := regexp.MustCompile(`time[=<](\d+(?:\.\d+)?)ms`)
-	if matches := timeRegex.FindStringSubmatch(outputStr); len(matches) > 1 {
-		if pingTime, err := strconv.ParseFloat(matches[1], 64); err == nil {
-			actualTime := pingTime / 1000.0 // Convert ms to seconds
-			result.ResponseTime = &actualTime
-		}
-	}
+	// Configure pinger
+	pinger.Count = 1
+	pinger.Timeout = 5 * time.Second
 
-	result.Status = "up"
-	return result
+	// Try unprivileged mode first (UDP), fallback to privileged (ICMP) if needed
+	pinger.SetPrivileged(false)
+
+	// Run ping with context cancellation
+	done := make(chan error, 1)
+	go func() {
+		done <- pinger.Run()
+	}()
+
+	select {
+	case <-ctx.Done():
+		pinger.Stop()
+		errMsg := "Ping cancelled"
+		result.ErrorMessage = &errMsg
+		responseTime := time.Since(start).Seconds()
+		result.ResponseTime = &responseTime
+		return result
+	case err := <-done:
+		responseTime := time.Since(start).Seconds()
+		result.ResponseTime = &responseTime
+
+		if err != nil {
+			// Try privileged mode if unprivileged failed
+			pinger.SetPrivileged(true)
+			err = pinger.Run()
+		}
+
+		if err != nil {
+			errMsg := fmt.Sprintf("Ping failed: %v", err)
+			result.ErrorMessage = &errMsg
+			return result
+		}
+
+		stats := pinger.Statistics()
+		if stats.PacketsRecv > 0 {
+			result.Status = "up"
+			// Use the actual RTT from the ping
+			actualTime := stats.AvgRtt.Seconds()
+			result.ResponseTime = &actualTime
+		} else {
+			errMsg := "No ping response received"
+			result.ErrorMessage = &errMsg
+		}
+
+		return result
+	}
 }
 
 // checkSite performs a check on a single site

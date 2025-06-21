@@ -1,11 +1,11 @@
-# SiteUp Monitoring Agent
+# sreoob Monitoring Agent
 
 [![Go Version](https://img.shields.io/badge/go-1.21%2B-blue.svg)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![WebSocket](https://img.shields.io/badge/websocket-enabled-brightgreen.svg)](#real-time-synchronization)
 [![Cross Platform](https://img.shields.io/badge/platform-linux%20%7C%20windows%20%7C%20macos-lightgrey.svg)](#cross-compilation)
 
-A lightweight Go-based monitoring agent that connects to a SiteUp master instance to monitor websites and services with **real-time synchronization**.
+A lightweight Go-based monitoring agent that connects to a sreoob master instance to monitor websites and services with **real-time synchronization**.
 
 ## 📋 Table of Contents
 
@@ -42,7 +42,7 @@ The agent is configured using environment variables:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `MASTER_FQDN` | Master SiteUp instance FQDN | `https://siteup.example.com` |
+| `MASTER_FQDN` | Master sreoob instance FQDN | `https://sreoob.example.com` |
 | `API_KEY` | Authentication key (≥64 chars) | `abc123...` (64+ characters) |
 
 > **Note**: If no protocol is specified in `MASTER_FQDN`, `https://` is assumed.
@@ -113,14 +113,14 @@ python3 -c "import secrets; print('Generated API Key:', secrets.token_hex(32))"
 
 ```bash
 # Set for current session
-export MASTER_FQDN="https://your-siteup-master.com"
+export MASTER_FQDN="https://your-sreoob-master.com"
 export API_KEY="your-64-character-api-key-here"
 export AGENT_PORT="8081"
 export USE_WEBSOCKET="true"
 export LOG_LEVEL="info"
 
 # Make permanent by adding to ~/.bashrc or ~/.zshrc
-echo 'export MASTER_FQDN="https://your-siteup-master.com"' >> ~/.bashrc
+echo 'export MASTER_FQDN="https://your-sreoob-master.com"' >> ~/.bashrc
 echo 'export API_KEY="your-64-character-api-key-here"' >> ~/.bashrc
 echo 'export AGENT_PORT="8081"' >> ~/.bashrc
 echo 'export USE_WEBSOCKET="true"' >> ~/.bashrc
@@ -137,14 +137,14 @@ source ~/.bashrc
 
 ```cmd
 REM Set for current session
-set MASTER_FQDN=https://your-siteup-master.com
+set MASTER_FQDN=https://your-sreoob-master.com
 set API_KEY=your-64-character-api-key-here
 set AGENT_PORT=8081
 set USE_WEBSOCKET=true
 set LOG_LEVEL=info
 
 REM Make permanent (requires admin privileges)
-setx MASTER_FQDN "https://your-siteup-master.com"
+setx MASTER_FQDN "https://your-sreoob-master.com"
 setx API_KEY "your-64-character-api-key-here"
 setx AGENT_PORT "8081"
 setx USE_WEBSOCKET "true"
@@ -160,14 +160,14 @@ setx LOG_LEVEL "info"
 
 ```powershell
 # Set for current session
-$env:MASTER_FQDN = "https://your-siteup-master.com"
+$env:MASTER_FQDN = "https://your-sreoob-master.com"
 $env:API_KEY = "your-64-character-api-key-here"
 $env:AGENT_PORT = "8081"
 $env:USE_WEBSOCKET = "true"
 $env:LOG_LEVEL = "info"
 
 # Make permanent for current user
-[Environment]::SetEnvironmentVariable("MASTER_FQDN", "https://your-siteup-master.com", "User")
+[Environment]::SetEnvironmentVariable("MASTER_FQDN", "https://your-sreoob-master.com", "User")
 [Environment]::SetEnvironmentVariable("API_KEY", "your-64-character-api-key-here", "User")
 [Environment]::SetEnvironmentVariable("AGENT_PORT", "8081", "User")
 [Environment]::SetEnvironmentVariable("USE_WEBSOCKET", "true", "User")
@@ -187,16 +187,16 @@ $env:LOG_LEVEL = "info"
 ```bash
 cd agent
 go mod tidy
-go build -o siteup-agent
+go build -o sreoob-agent
 ```
 
 ### Quick Start 🚀
 
 ```bash
 # Generate secure API key and run
-export MASTER_FQDN="https://your-siteup-master.com"
+export MASTER_FQDN="https://your-sreoob-master.com"
 export API_KEY=$(openssl rand -hex 32)
-./siteup-agent
+./sreoob-agent
 ```
 
 ### Using Environment Files
@@ -204,7 +204,7 @@ export API_KEY=$(openssl rand -hex 32)
 ```bash
 # Create .env file
 cat > .env << 'EOF'
-MASTER_FQDN=https://your-siteup-master.com
+MASTER_FQDN=https://your-sreoob-master.com
 API_KEY=your-64-character-api-key-generated-above
 AGENT_PORT=8081
 USE_WEBSOCKET=true
@@ -213,7 +213,7 @@ EOF
 
 # Load and run
 source .env
-./siteup-agent
+./sreoob-agent
 ```
 
 ## 🐳 Docker Deployment
@@ -222,17 +222,17 @@ source .env
 
 ```bash
 # Build image
-docker build -t siteup-agent .
+docker build -t sreoob-agent .
 
 # Run container
 docker run -d \
-  --name siteup-agent \
-  -e MASTER_FQDN=https://your-siteup-master.com \
+  --name sreoob-agent \
+  -e MASTER_FQDN=https://your-sreoob-master.com \
   -e API_KEY=your-64-character-api-key-generated-above \
   -e AGENT_PORT=8081 \
   -e USE_WEBSOCKET=true \
   --restart unless-stopped \
-  siteup-agent
+  sreoob-agent
 ```
 
 ### Docker Compose
@@ -240,11 +240,11 @@ docker run -d \
 ```yaml
 version: '3.8'
 services:
-  siteup-agent:
+  sreoob-agent:
     build: .
     restart: unless-stopped
     environment:
-      - MASTER_FQDN=https://your-siteup-master.com
+      - MASTER_FQDN=https://your-sreoob-master.com
       - API_KEY=your-64-character-api-key
       - AGENT_PORT=8081
       - USE_WEBSOCKET=true
@@ -310,7 +310,7 @@ The agent provides structured logging with the following levels:
 ### Example Log Output
 
 ```log
-INFO: SiteUp Agent starting - connecting to master at https://siteup.example.com
+INFO: SREoob Agent starting - connecting to master at https://sreoob.example.com
 INFO: Using custom agent port: 8081
 INFO: WebSocket enabled for real-time updates
 INFO: Successfully connected to master
@@ -381,10 +381,10 @@ INFO: Received site update via WebSocket: 3 sites
 go mod tidy
 
 # Build for current platform
-go build -o siteup-agent
+go build -o sreoob-agent
 
 # Build with optimizations
-go build -ldflags "-s -w" -o siteup-agent
+go build -ldflags "-s -w" -o sreoob-agent
 ```
 
 ### Running Tests
@@ -399,19 +399,19 @@ go test -race ./...  # Race condition detection
 
 ```bash
 # Linux AMD64
-GOOS=linux GOARCH=amd64 go build -o siteup-agent-linux-amd64
+GOOS=linux GOARCH=amd64 go build -o sreoob-agent-linux-amd64
 
 # Windows AMD64
-GOOS=windows GOARCH=amd64 go build -o siteup-agent-windows-amd64.exe
+GOOS=windows GOARCH=amd64 go build -o sreoob-agent-windows-amd64.exe
 
 # macOS AMD64 (Intel)
-GOOS=darwin GOARCH=amd64 go build -o siteup-agent-darwin-amd64
+GOOS=darwin GOARCH=amd64 go build -o sreoob-agent-darwin-amd64
 
 # macOS ARM64 (Apple Silicon)
-GOOS=darwin GOARCH=arm64 go build -o siteup-agent-darwin-arm64
+GOOS=darwin GOARCH=arm64 go build -o sreoob-agent-darwin-arm64
 
 # Linux ARM64 (for Raspberry Pi, etc.)
-GOOS=linux GOARCH=arm64 go build -o siteup-agent-linux-arm64
+GOOS=linux GOARCH=arm64 go build -o sreoob-agent-linux-arm64
 ```
 
 ### Build Script
@@ -428,8 +428,8 @@ GOOS=linux GOARCH=arm64 go build -o siteup-agent-linux-arm64
 
 ```mermaid
 graph TB
-    Agent[SiteUp Agent] 
-    Master[SiteUp Master]
+    Agent[sreoob Agent] 
+    Master[sreoob Master]
     
     Agent -.->|WebSocket<br/>wss://master:8081/agent/ws| Master
     Agent -.->|HTTP Fallback<br/>https://master:8081/api/| Master

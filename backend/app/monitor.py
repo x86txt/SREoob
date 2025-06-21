@@ -7,6 +7,14 @@ from .database import get_sites, record_check, get_site_status
 from .config import settings
 import re
 
+# Import ping3 for native ICMP ping
+try:
+    import ping3
+    PING3_AVAILABLE = True
+except ImportError:
+    PING3_AVAILABLE = False
+    logging.warning("ping3 library not available. Ping monitoring will be disabled.")
+
 logger = logging.getLogger(__name__)
 
 class SiteMonitor:
@@ -88,9 +96,39 @@ class SiteMonitor:
 
     async def check_sites(self, sites: List[Dict[str, Any]]) -> List[Optional[Dict[str, Any]]]:
         """Checks a list of sites concurrently."""
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
-            tasks = [self.check_single_site(client, site) for site in sites]
-            return await asyncio.gather(*tasks, return_exceptions=True)
+        # Separate HTTP/HTTPS sites from ping sites
+        http_sites = [site for site in sites if not site['url'].startswith('ping://')]
+        ping_sites = [site for site in sites if site['url'].startswith('ping://')]
+        
+        results = []
+        
+        # Check HTTP/HTTPS sites with httpx client
+        if http_sites:
+            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+                http_tasks = [self.check_single_site(client, site) for site in http_sites]
+                http_results = await asyncio.gather(*http_tasks, return_exceptions=True)
+                results.extend(http_results)
+        
+        # Check ping sites separately
+        if ping_sites:
+            ping_tasks = [self.check_ping_site(site) for site in ping_sites]
+            ping_results = await asyncio.gather(*ping_tasks, return_exceptions=True)
+            results.extend(ping_results)
+        
+        # Reorder results to match original site order
+        if http_sites and ping_sites:
+            ordered_results = []
+            http_idx = ping_idx = 0
+            for site in sites:
+                if site['url'].startswith('ping://'):
+                    ordered_results.append(ping_results[ping_idx])
+                    ping_idx += 1
+                else:
+                    ordered_results.append(http_results[http_idx])
+                    http_idx += 1
+            return ordered_results
+        
+        return results
 
     async def check_all_sites(self) -> List[Optional[Dict[str, Any]]]:
         """Manually triggers a check of all sites."""
@@ -130,6 +168,62 @@ class SiteMonitor:
         except Exception as e:
             logger.error(f"Unexpected error checking site {url}: {e}", exc_info=True)
             return None # Indicate a failure in the check itself
+
+    @staticmethod
+    async def check_ping_site(site: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Performs a ping check for a given site (ping://) using native ping3 library."""
+        if not PING3_AVAILABLE:
+            return {
+                "status": "down",
+                "status_code": None,
+                "response_time": 0,
+                "error_message": "ping3 library not available",
+            }
+        
+        url = site['url']
+        host = url.replace('ping://', '')
+        
+        try:
+            # Use ping3 for native ICMP ping
+            # Run in thread pool to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            response_time = await loop.run_in_executor(
+                None, 
+                lambda: ping3.ping(host, timeout=4, unit='s')
+            )
+            
+            if response_time is not None:
+                # Successful ping
+                return {
+                    "status": "up",
+                    "status_code": 0,  # Use 0 for successful ping
+                    "response_time": response_time,
+                    "error_message": None,
+                }
+            elif response_time is False:
+                # Host unknown/cannot resolve
+                return {
+                    "status": "down",
+                    "status_code": None,
+                    "response_time": 0,
+                    "error_message": "Host unknown or cannot resolve",
+                }
+            else:
+                # Timeout (response_time is None)
+                return {
+                    "status": "down",
+                    "status_code": None,
+                    "response_time": 4.0,  # Timeout duration
+                    "error_message": "Ping timeout",
+                }
+        except Exception as e:
+            logger.error(f"Error pinging {host}: {e}")
+            return {
+                "status": "down",
+                "status_code": None,
+                "response_time": 0,
+                "error_message": str(e),
+            }
 
     def _parse_interval(self, interval_str: Optional[str]) -> int:
         """Parses a time string like '30s', '5m', '1h' into seconds."""
