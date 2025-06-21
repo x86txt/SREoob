@@ -58,6 +58,8 @@ wget -qO- https://raw.githubusercontent.com/yourusername/sreoob/main/agent/insta
 - [Generating API Keys](#-generating-a-secure-api-key)
 - [Environment Variables](#-setting-environment-variables)
 - [Installation](#-installation)
+- [Building from Source](#-building-from-source)
+- [GitHub Actions & Releases](#-github-actions--releases)
 - [Docker Deployment](#-docker-deployment)
 - [Monitoring Behavior](#-monitoring-behavior)
 - [Supported Site Types](#-supported-site-types)
@@ -597,6 +599,179 @@ Monitoring Flow:
 4. Submits results via WebSocket (or HTTP if WS fails)
 5. Receives real-time updates via WebSocket
 6. Adapts sync frequency based on site intervals
+```
+
+## 🔨 Building from Source
+
+### Local Development Build
+
+```bash
+# Quick build for current platform
+cd agent
+go build -o sreoob-agent
+
+# Build with version info
+./build-local.sh "1.0.0"
+
+# Cross-platform build (all supported platforms)
+./build-all.sh "1.0.0"
+```
+
+### Manual Cross-Platform Build
+
+```bash
+# Linux AMD64
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o sreoob-agent-linux-amd64
+
+# Linux ARM64 (AWS Graviton, Raspberry Pi)
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o sreoob-agent-linux-arm64
+
+# Linux ARMv7 (Raspberry Pi)
+GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -ldflags="-s -w" -o sreoob-agent-linux-arm
+
+# Linux RISC-V 64-bit
+GOOS=linux GOARCH=riscv64 CGO_ENABLED=0 go build -ldflags="-s -w" -o sreoob-agent-linux-riscv64
+
+# macOS ARM64 (Apple Silicon)
+GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o sreoob-agent-darwin-arm64
+
+# Windows AMD64
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o sreoob-agent-windows-amd64.exe
+```
+
+### Build Scripts
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `build-local.sh` | Build for current platform | `./build-local.sh [version]` |
+| `build-all.sh` | Cross-platform build | `./build-all.sh [version]` |
+
+Both scripts support version embedding and create optimized binaries with:
+- ✅ Static linking (no external dependencies)
+- ✅ Stripped symbols for smaller size
+- ✅ Version information embedded
+- ✅ Build time and Git commit tracking
+
+## 🚀 GitHub Actions & Releases
+
+### Automated Release Pipeline
+
+The repository includes a comprehensive GitHub Actions workflow that automatically:
+
+1. **🔍 Detects Changes**: Triggers on pushes to `main` branch affecting agent code
+2. **📊 Version Management**: Auto-increments version numbers (patch/minor/major)
+3. **🏗️ Cross-Platform Builds**: Compiles for all supported platforms
+4. **📦 Release Creation**: Creates GitHub releases with binaries and documentation
+5. **🔒 Security**: Generates SHA256 checksums for all binaries
+
+### Supported Build Platforms
+
+| Platform | Architecture | Binary Name | AWS Compatible |
+|----------|-------------|-------------|----------------|
+| **Linux** | AMD64 | `sreoob-agent-linux-amd64` | ✅ EC2 x86_64 |
+| **Linux** | ARM64 | `sreoob-agent-linux-arm64` | ✅ EC2 Graviton |
+| **Linux** | ARMv7 | `sreoob-agent-linux-arm` | ✅ Raspberry Pi |
+| **Linux** | RISC-V 64 | `sreoob-agent-linux-riscv64` | ✅ Future processors |
+| **macOS** | ARM64 | `sreoob-agent-darwin-arm64` | ✅ Apple Silicon |
+| **Windows** | AMD64 | `sreoob-agent-windows-amd64.exe` | ✅ Windows Server |
+
+### Triggering Releases
+
+#### Automatic (Recommended)
+```bash
+# Any push to main with agent changes triggers a patch release
+git add agent/
+git commit -m "feat: improve agent performance"
+git push origin main
+# → Creates release v1.0.1
+```
+
+#### Manual Release
+```bash
+# Trigger via GitHub Actions UI
+# Go to: Actions → Build and Release SREoob Agent → Run workflow
+# Choose version bump: patch/minor/major
+```
+
+#### Version Bump Types
+
+| Type | When to Use | Example |
+|------|-------------|---------|
+| **patch** | Bug fixes, small improvements | `v1.0.0` → `v1.0.1` |
+| **minor** | New features, backward compatible | `v1.0.0` → `v1.1.0` |
+| **major** | Breaking changes | `v1.0.0` → `v2.0.0` |
+
+### Release Features
+
+Each release includes:
+
+- ✅ **Pre-compiled binaries** for all platforms
+- ✅ **SHA256 checksums** for security verification
+- ✅ **Comprehensive release notes** with changelog
+- ✅ **Installation instructions** and platform compatibility
+- ✅ **Version information** embedded in binaries
+- ✅ **Security hardening** with static linking and stripped symbols
+
+### Using Released Binaries
+
+```bash
+# Download from GitHub releases
+curl -fsSL https://github.com/x86txt/SREoob/releases/latest/download/sreoob-agent-linux-amd64 -o sreoob-agent
+chmod +x sreoob-agent
+
+# Verify checksum (recommended)
+curl -fsSL https://github.com/x86txt/SREoob/releases/latest/download/SHA256SUMS -o SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+
+# Check version
+./sreoob-agent -version
+```
+
+### Development Workflow
+
+```bash
+# 1. Make changes to agent code
+vim agent/main.go
+
+# 2. Test locally
+cd agent
+./build-local.sh
+./sreoob-agent-linux-amd64 -version
+
+# 3. Commit and push
+git add agent/
+git commit -m "feat: add new monitoring feature"
+git push origin main
+
+# 4. GitHub Actions automatically:
+#    - Builds all platforms
+#    - Creates release v1.1.0
+#    - Uploads binaries
+#    - Updates documentation
+```
+
+### CI/CD Pipeline Details
+
+```yaml
+# Workflow triggers:
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'agent/**', '.github/workflows/release.yml' ]
+  workflow_dispatch:
+    inputs:
+      version_bump: [ patch, minor, major ]
+
+# Build matrix:
+strategy:
+  matrix:
+    include:
+      - { goos: linux, goarch: amd64 }
+      - { goos: linux, goarch: arm64 }
+      - { goos: linux, goarch: arm, goarm: 7 }
+      - { goos: linux, goarch: riscv64 }
+      - { goos: darwin, goarch: arm64 }
+      - { goos: windows, goarch: amd64 }
 ```
 
 ---

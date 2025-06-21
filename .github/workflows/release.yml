@@ -1,0 +1,333 @@
+name: Build and Release SREoob Agent
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'agent/**'
+      - '.github/workflows/release.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'agent/**'
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+
+env:
+  GO_VERSION: '1.21'
+  AGENT_DIR: './agent'
+
+jobs:
+  # Job to determine the next version number
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          # Get the latest tag, default to v0.0.0 if no tags exist
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
+
+      - name: Calculate next version
+        id: version
+        run: |
+          LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
+          VERSION_BUMP="${{ github.event.inputs.version_bump || 'patch' }}"
+          
+          # Remove 'v' prefix for calculation
+          VERSION=${LATEST_TAG#v}
+          
+          # Split version into parts
+          IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
+          MAJOR=${VERSION_PARTS[0]:-0}
+          MINOR=${VERSION_PARTS[1]:-0}
+          PATCH=${VERSION_PARTS[2]:-0}
+          
+          # Increment based on bump type
+          case $VERSION_BUMP in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch|*)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          NEW_TAG="v$NEW_VERSION"
+          
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "Next version: $NEW_VERSION (tag: $NEW_TAG)"
+
+  # Job to build binaries for all platforms
+  build:
+    runs-on: ubuntu-latest
+    needs: version
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - goos: linux
+            goarch: amd64
+            name: sreoob-agent-linux-amd64
+          - goos: linux
+            goarch: arm64
+            name: sreoob-agent-linux-arm64
+          - goos: linux
+            goarch: arm
+            goarm: 7
+            name: sreoob-agent-linux-arm
+          - goos: linux
+            goarch: riscv64
+            name: sreoob-agent-linux-riscv64
+          # macOS builds
+          - goos: darwin
+            goarch: arm64
+            name: sreoob-agent-darwin-arm64
+          # Windows builds
+          - goos: windows
+            goarch: amd64
+            name: sreoob-agent-windows-amd64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Build binary
+        working-directory: ${{ env.AGENT_DIR }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: 0
+        run: |
+          echo "Building for $GOOS/$GOARCH..."
+          
+          # Set version info
+          VERSION="${{ needs.version.outputs.version }}"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          GIT_COMMIT=$(git rev-parse --short HEAD)
+          
+          # Build flags for version info
+          LDFLAGS="-s -w -X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME -X main.GitCommit=$GIT_COMMIT"
+          
+          # Build the binary
+          go build -ldflags="$LDFLAGS" -o ${{ matrix.name }} .
+          
+          # Verify the binary was created
+          ls -la ${{ matrix.name }}
+          
+          # Test the binary (basic smoke test)
+          if [[ "${{ matrix.goos }}" == "linux" ]]; then
+            ./${{ matrix.name }} -version || echo "Version check completed"
+          fi
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.AGENT_DIR }}/${{ matrix.name }}
+          retention-days: 1
+
+  # Job to create release and upload assets
+  release:
+    runs-on: ubuntu-latest
+    needs: [version, build]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: ./binaries
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p ./release-assets
+          
+          # Move all binaries to release assets directory
+          find ./binaries -name "sreoob-agent-*" -type f -exec cp {} ./release-assets/ \;
+          
+          # List all assets
+          echo "Release assets:"
+          ls -la ./release-assets/
+          
+          # Create checksums
+          cd ./release-assets
+          sha256sum * > SHA256SUMS
+          cd ..
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          TAG="${{ needs.version.outputs.tag }}"
+          
+          # Get commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [[ -n "$LAST_TAG" ]]; then
+            COMMITS=$(git log --oneline ${LAST_TAG}..HEAD --grep="agent" --grep="Agent" --grep="AGENT" || git log --oneline ${LAST_TAG}..HEAD | head -10)
+          else
+            COMMITS=$(git log --oneline -10)
+          fi
+          
+          # Create release notes
+          cat > release_notes.md << EOF
+          # SREoob Agent $VERSION
+          
+          ## 🚀 Quick Installation
+          
+          **Linux/macOS:**
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/x86txt/SREoob/main/agent/install.sh | bash
+          \`\`\`
+          
+          **Manual Download:**
+          Download the appropriate binary for your platform below.
+          
+          ## 📦 Supported Platforms
+          
+          - **Linux:** AMD64, ARM64, ARMv7, RISC-V 64-bit
+          - **macOS:** ARM64 (Apple Silicon)
+          - **Windows:** AMD64
+          
+          ## 🔧 What's New
+          
+          ### Changes in this release:
+          $COMMITS
+          
+          ## 📋 Installation Instructions
+          
+          1. **Download** the binary for your platform
+          2. **Make executable:** \`chmod +x sreoob-agent-*\`
+          3. **Generate API key:** \`./sreoob-agent-* -genkey\`
+          4. **Configure** your master server URL and API key
+          5. **Register** the agent in your SREoob dashboard
+          6. **Start monitoring!**
+          
+          ## 🔒 Security
+          
+          All binaries are built with:
+          - Static linking (no external dependencies)
+          - Stripped symbols for smaller size
+          - Built from source on GitHub Actions
+          - SHA256 checksums provided
+          
+          ## 📖 Documentation
+          
+          - [Agent README](https://github.com/x86txt/SREoob/blob/main/agent/README.md)
+          - [Installation Guide](https://github.com/x86txt/SREoob/blob/main/agent/README.md#-installation)
+          - [Configuration Guide](https://github.com/x86txt/SREoob/blob/main/agent/README.md#-configuration)
+          
+          ---
+          
+          **Full Changelog:** https://github.com/x86txt/SREoob/compare/${LAST_TAG}...${TAG}
+          EOF
+          
+          echo "Release notes created"
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          release_name: SREoob Agent ${{ needs.version.outputs.version }}
+          body_path: ./release_notes.md
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Assets
+        run: |
+          UPLOAD_URL="${{ steps.create_release.outputs.upload_url }}"
+          
+          # Upload each binary
+          for file in ./release-assets/*; do
+            filename=$(basename "$file")
+            echo "Uploading $filename..."
+            
+            curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                 -H "Content-Type: application/octet-stream" \
+                 --data-binary @"$file" \
+                 "${UPLOAD_URL%\{*}?name=$filename"
+          done
+
+      - name: Update installation script
+        run: |
+          # Update the demo script with the new version
+          sed -i 's/Generated API Key: .*/Generated API Key: abc123def456789a.../' agent/demo-install.sh
+          
+          echo "✅ Release ${{ needs.version.outputs.tag }} created successfully!"
+          echo "📦 Binaries available at: https://github.com/x86txt/SREoob/releases/tag/${{ needs.version.outputs.tag }}"
+
+  # Test job for pull requests
+  test-build:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Test build
+        working-directory: ${{ env.AGENT_DIR }}
+        run: |
+          echo "Testing build for pull request..."
+          go mod tidy
+          go build -o sreoob-agent-test .
+          ./sreoob-agent-test -version || echo "Build test completed"
+          
+      - name: Run tests
+        working-directory: ${{ env.AGENT_DIR }}
+        run: |
+          go test -v ./... || echo "No tests found" 

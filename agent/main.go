@@ -9,12 +9,25 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"golang.org/x/crypto/argon2"
 )
+
+// Version information (set by build flags)
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+)
+
+// getGoVersion returns the Go version used to build the binary
+func getGoVersion() string {
+	return runtime.Version()
+}
 
 // generateAPIKey generates a secure 64-character API key
 func generateAPIKey() (string, error) {
@@ -53,7 +66,17 @@ func generateArgon2Hash(apiKey string) string {
 func main() {
 	// Parse command line flags
 	var genKey = flag.Bool("genkey", false, "Generate a new API key and Argon2 hash")
+	var showVersion = flag.Bool("version", false, "Show version information")
 	flag.Parse()
+
+	// Handle version display
+	if *showVersion {
+		fmt.Printf("SREoob Agent %s\n", Version)
+		fmt.Printf("Build Time: %s\n", BuildTime)
+		fmt.Printf("Git Commit: %s\n", GitCommit)
+		fmt.Printf("Go Version: %s\n", getGoVersion())
+		return
+	}
 
 	// Handle key generation
 	if *genKey {
@@ -94,7 +117,8 @@ func main() {
 		log.Fatalf("FATAL: Configuration validation failed: %v", err)
 	}
 
-	log.Printf("INFO: SREoob Agent starting")
+	log.Printf("INFO: SREoob Agent v%s starting", Version)
+	log.Printf("INFO: Build: %s (%s)", BuildTime, GitCommit)
 	log.Printf("INFO: Agent ID: %s", config.AgentID)
 	log.Printf("INFO: Hostname: %s", config.Hostname)
 	log.Printf("INFO: Master FQDN: %s", config.MasterFQDN)
