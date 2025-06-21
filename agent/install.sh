@@ -176,7 +176,7 @@ echo ""
 # Generate API key
 echo -e "${BLUE}Generating API key...${NC}"
 API_KEY_OUTPUT=$("${INSTALL_DIR}/${BINARY_NAME}" -genkey 2>&1)
-API_KEY=$(echo "$API_KEY_OUTPUT" | grep "Generated API Key:" | cut -d: -f2 | xargs)
+API_KEY=$(echo "$API_KEY_OUTPUT" | grep "AGENT_API_KEY=" | cut -d= -f2)
 
 if [[ -z "$API_KEY" ]]; then
     echo -e "${RED}✗${NC} Failed to generate API key"
