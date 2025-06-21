@@ -173,18 +173,63 @@ else
 fi
 echo ""
 
-# Generate API key
-echo -e "${BLUE}Generating API key...${NC}"
-API_KEY_OUTPUT=$("${INSTALL_DIR}/${BINARY_NAME}" -genkey 2>&1)
-API_KEY=$(echo "$API_KEY_OUTPUT" | grep "AGENT_API_KEY=" | cut -d= -f2)
+# Generate API key and hash
+echo -e "${BLUE}Generating API key and hash...${NC}"
 
+# Try using the agent binary first (preferred method)
+if API_KEY_OUTPUT=$("${INSTALL_DIR}/${BINARY_NAME}" -genkey 2>&1); then
+    API_KEY=$(echo "$API_KEY_OUTPUT" | grep "AGENT_API_KEY=" | cut -d= -f2)
+    API_KEY_HASH=$(echo "$API_KEY_OUTPUT" | grep "AGENT_API_KEY_HASH=" | cut -d= -f2)
+    
+    if [[ -n "$API_KEY" && -n "$API_KEY_HASH" ]]; then
+        echo -e "${GREEN}✓${NC} API key and hash generated with agent binary"
+        echo -e "${GREEN}✓${NC} API key: ${API_KEY:0:16}..."
+        echo -e "${GREEN}✓${NC} Hash: ${API_KEY_HASH:0:16}..."
+    else
+        echo -e "${YELLOW}!${NC} Agent binary output format unexpected, falling back to manual generation"
+        API_KEY=""
+        API_KEY_HASH=""
+    fi
+else
+    echo -e "${YELLOW}!${NC} Agent binary key generation failed, falling back to manual generation"
+    API_KEY=""
+    API_KEY_HASH=""
+fi
+
+# Fallback to manual generation if agent binary method failed
 if [[ -z "$API_KEY" ]]; then
-    echo -e "${RED}✗${NC} Failed to generate API key"
-    echo "Output: $API_KEY_OUTPUT"
+    echo -e "${BLUE}Generating API key manually...${NC}"
+    
+    if command_exists openssl; then
+        API_KEY=$(openssl rand -hex 32)
+        API_KEY_HASH=$(echo -n "$API_KEY" | openssl dgst -sha256 -hex | cut -d' ' -f2)
+        echo -e "${GREEN}✓${NC} API key and hash generated with openssl"
+    elif command_exists python3; then
+        GENERATION_OUTPUT=$(python3 -c "
+import secrets
+import hashlib
+key = secrets.token_hex(32)
+hash_obj = hashlib.sha256(key.encode())
+print(f'KEY:{key}')
+print(f'HASH:{hash_obj.hexdigest()}')
+")
+        API_KEY=$(echo "$GENERATION_OUTPUT" | grep "KEY:" | cut -d: -f2)
+        API_KEY_HASH=$(echo "$GENERATION_OUTPUT" | grep "HASH:" | cut -d: -f2)
+        echo -e "${GREEN}✓${NC} API key and hash generated with python3"
+    else
+        echo -e "${RED}✗${NC} Cannot generate API key - agent binary, openssl, and python3 all unavailable"
+        echo -e "${YELLOW}Please install openssl or python3 to generate secure API keys${NC}"
+        exit 1
+    fi
+fi
+
+if [[ -z "$API_KEY" || -z "$API_KEY_HASH" ]]; then
+    echo -e "${RED}✗${NC} Failed to generate API key and hash"
     exit 1
 fi
 
-echo -e "${GREEN}✓${NC} API key generated: ${API_KEY:0:16}..."
+echo -e "${GREEN}✓${NC} API key: ${API_KEY:0:16}..."
+echo -e "${GREEN}✓${NC} Hash: ${API_KEY_HASH:0:16}..."
 echo ""
 
 # Create configuration file
@@ -276,6 +321,11 @@ echo -e "   • API Key: ${CYAN}${API_KEY}${NC}"
 if [[ -n "$AGENT_DESCRIPTION" ]]; then
     echo -e "   • Description: ${CYAN}${AGENT_DESCRIPTION}${NC}"
 fi
+echo ""
+
+echo -e "${YELLOW}📋 For manual server configuration (if needed):${NC}"
+echo -e "   • Agent API Key: ${CYAN}${API_KEY}${NC}"
+echo -e "   • Agent Hash: ${CYAN}${API_KEY_HASH}${NC}"
 echo ""
 
 echo -e "${YELLOW}2. Start the agent:${NC}"

@@ -181,13 +181,44 @@ while true; do
     case $ENABLE_AUTH in
         [Yy]* )
             echo ""
-            echo -e "${CYAN}Enter admin API key (64 characters recommended):${NC}"
-            echo -e "${YELLOW}Tip:${NC} Generate a secure key with: openssl rand -hex 32"
-            read -p "Admin API Key: " ADMIN_API_KEY < /dev/tty
-            
-            if [[ ${#ADMIN_API_KEY} -lt 32 ]]; then
-                echo -e "${YELLOW}!${NC} Warning: API key is shorter than recommended (32+ characters)"
-            fi
+            echo -e "${CYAN}Choose admin API key setup:${NC}"
+            echo -e "${YELLOW}1)${NC} Auto-generate secure API key ${GREEN}[Recommended]${NC}"
+            echo -e "${YELLOW}2)${NC} Enter custom API key"
+            echo ""
+            while true; do
+                read -p "Choice (1-2): " KEY_CHOICE < /dev/tty
+                
+                case $KEY_CHOICE in
+                    1)
+                        echo -e "${BLUE}Generating secure admin API key...${NC}"
+                        if command_exists openssl; then
+                            ADMIN_API_KEY=$(openssl rand -hex 32)
+                            echo -e "${GREEN}✓${NC} Admin API key generated with openssl"
+                        elif command_exists python3; then
+                            ADMIN_API_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+                            echo -e "${GREEN}✓${NC} Admin API key generated with python3"
+                        else
+                            echo -e "${RED}✗${NC} Cannot generate API key - neither openssl nor python3 available"
+                            echo -e "${YELLOW}Please install openssl or python3, or choose option 2 to enter a custom key${NC}"
+                            continue
+                        fi
+                        break
+                        ;;
+                    2)
+                        echo -e "${CYAN}Enter admin API key (64 characters recommended):${NC}"
+                        echo -e "${YELLOW}Tip:${NC} Generate a secure key with: openssl rand -hex 32"
+                        read -p "Admin API Key: " ADMIN_API_KEY < /dev/tty
+                        
+                        if [[ ${#ADMIN_API_KEY} -lt 32 ]]; then
+                            echo -e "${YELLOW}!${NC} Warning: API key is shorter than recommended (32+ characters)"
+                        fi
+                        break
+                        ;;
+                    *)
+                        echo -e "${RED}✗${NC} Invalid choice. Please enter 1 or 2."
+                        ;;
+                esac
+            done
             break
             ;;
         [Nn]* )
@@ -228,30 +259,26 @@ if [[ "$DEPLOY_MODE" == "full" ]]; then
     fi
 fi
 
-# Generate Argon2 hash if admin key is provided
+# Generate hash if admin key is provided
 if [[ -n "$ADMIN_API_KEY" ]]; then
-    echo -e "${BLUE}Generating Argon2 hash for admin API key...${NC}"
-    # Check if python3 is available
-    if ! command_exists python3; then
-        echo -e "${YELLOW}!${NC} Python3 not found, will use plain API key (less secure)"
-        ADMIN_API_KEY_HASH="$ADMIN_API_KEY"
-    else
-        # Generate proper Argon2 hash using Python
+    echo -e "${BLUE}Generating hash for admin API key...${NC}"
+    # Check if openssl is available (most common), fallback to python3, then plain key
+    if command_exists openssl; then
+        # Use SHA-256 hash with openssl
+        ADMIN_API_KEY_HASH=$(echo -n "$ADMIN_API_KEY" | openssl dgst -sha256 -hex | cut -d' ' -f2)
+        echo -e "${GREEN}✓${NC} SHA-256 hash generated with openssl"
+    elif command_exists python3; then
+        # Use SHA-256 hash with Python
         ADMIN_API_KEY_HASH=$(python3 -c "
 import hashlib
-import secrets
-import base64
-
 key = '$ADMIN_API_KEY'
-salt = secrets.token_bytes(32)
-# Using PBKDF2 as a fallback since argon2 might not be available
-hash_bytes = hashlib.pbkdf2_hmac('sha256', key.encode(), salt, 100000)
-# Format as argon2-like string for compatibility - escape $ for Docker Compose
-salt_b64 = base64.b64encode(salt).decode().rstrip('=')
-hash_b64 = base64.b64encode(hash_bytes).decode().rstrip('=')
-print(f'\$\$argon2id\$\$v=19\$\$m=65536,t=3,p=4\$\${salt_b64}\$\${hash_b64}')
+hash_hex = hashlib.sha256(key.encode()).hexdigest()
+print(hash_hex)
 ")
-        echo -e "${GREEN}✓${NC} Argon2 hash generated"
+        echo -e "${GREEN}✓${NC} SHA-256 hash generated with python3"
+    else
+        echo -e "${YELLOW}!${NC} Neither openssl nor python3 found, using plain API key (less secure)"
+        ADMIN_API_KEY_HASH="$ADMIN_API_KEY"
     fi
 fi
 
@@ -362,8 +389,11 @@ esac
 echo ""
 
 if [[ -n "$ADMIN_API_KEY" ]]; then
-    echo -e "${YELLOW}3. Admin authentication:${NC}"
-    echo -e "   ${CYAN}API Key: $ADMIN_API_KEY${NC}"
+    echo -e "${YELLOW}3. Admin authentication credentials:${NC}"
+    echo -e "   ${CYAN}Admin API Key: $ADMIN_API_KEY${NC}"
+    if [[ -n "$ADMIN_API_KEY_HASH" ]]; then
+        echo -e "   ${CYAN}Admin Hash: $ADMIN_API_KEY_HASH${NC}"
+    fi
     echo ""
 fi
 

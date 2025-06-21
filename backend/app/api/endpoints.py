@@ -14,7 +14,7 @@ import socket
 from urllib.parse import urlparse
 from pydantic import BaseModel, constr, validator
 import re
-from argon2 import PasswordHasher
+import hashlib
 
 router = APIRouter()
 ph = PasswordHasher()
@@ -676,8 +676,8 @@ async def list_agents():
 async def create_agent(agent: AgentCreate):
     """Add a new agent by hashing the provided API key."""
     try:
-        # Hash the API key using Argon2
-        api_key_hash = ph.hash(agent.api_key)
+        # Hash the API key using SHA-256
+        api_key_hash = hashlib.sha256(agent.api_key.encode()).hexdigest()
         
         # Add agent to database
         agent_id = await add_agent(agent.name, api_key_hash, agent.description)

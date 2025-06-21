@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -13,8 +14,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"golang.org/x/crypto/argon2"
 )
 
 // Version information (set by build flags)
@@ -38,34 +37,15 @@ func generateAPIKey() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-// generateArgon2Hash generates an Argon2 hash for the given API key
-func generateArgon2Hash(apiKey string) string {
-	// Generate a random salt
-	salt := make([]byte, 32)
-	if _, err := rand.Read(salt); err != nil {
-		log.Fatalf("Failed to generate salt: %v", err)
-	}
-
-	// Argon2 parameters (matching the backend settings)
-	time := uint32(3)
-	memory := uint32(4096)
-	threads := uint8(1)
-	keyLen := uint32(32)
-
-	// Generate the hash
-	hash := argon2.IDKey([]byte(apiKey), salt, time, memory, threads, keyLen)
-
-	// Format as Argon2 string (compatible with Python argon2-cffi)
-	saltHex := hex.EncodeToString(salt)
-	hashHex := hex.EncodeToString(hash)
-
-	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
-		memory, time, threads, saltHex, hashHex)
+// generateSHA256Hash generates a SHA-256 hash for the given API key
+func generateSHA256Hash(apiKey string) string {
+	hash := sha256.Sum256([]byte(apiKey))
+	return hex.EncodeToString(hash[:])
 }
 
 func main() {
 	// Parse command line flags
-	var genKey = flag.Bool("genkey", false, "Generate a new API key and Argon2 hash")
+	var genKey = flag.Bool("genkey", false, "Generate a new API key and SHA-256 hash")
 	var showVersion = flag.Bool("version", false, "Show version information")
 	flag.Parse()
 
@@ -80,7 +60,7 @@ func main() {
 
 	// Handle key generation
 	if *genKey {
-		fmt.Println("Generating new API key and Argon2 hash...")
+		fmt.Println("Generating new API key and SHA-256 hash...")
 		fmt.Println(strings.Repeat("=", 50))
 
 		apiKey, err := generateAPIKey()
@@ -88,13 +68,13 @@ func main() {
 			log.Fatalf("FATAL: Failed to generate API key: %v", err)
 		}
 
-		hash := generateArgon2Hash(apiKey)
+		hash := generateSHA256Hash(apiKey)
 
 		fmt.Printf("Generated API Key (64 characters):\n")
 		fmt.Printf("AGENT_API_KEY=%s\n\n", apiKey)
 
-		fmt.Printf("Generated Argon2 Hash (for server .env file):\n")
-		fmt.Printf("AGENT_API_KEY_HASH=\"%s\"\n\n", hash)
+		fmt.Printf("Generated SHA-256 Hash (for server .env file):\n")
+		fmt.Printf("AGENT_API_KEY_HASH=%s\n\n", hash)
 
 		fmt.Println("Instructions:")
 		fmt.Println("1. Copy the AGENT_API_KEY to your agent's .env file")

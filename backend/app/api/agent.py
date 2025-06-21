@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+import hashlib
 from typing import List, Optional, Dict, Any
 import json
 import asyncio
@@ -16,10 +15,22 @@ from ..monitor import get_monitor
 logger = logging.getLogger(__name__)
 router = APIRouter()
 security = HTTPBearer()
-ph = PasswordHasher()
 
 # Connected agents registry
 connected_agents: Dict[str, WebSocket] = {}
+
+def verify_agent_api_key(provided_key: str, stored_hash: str) -> bool:
+    """Verify agent API key using SHA-256 hash comparison"""
+    # Generate SHA-256 hash of the provided key
+    provided_hash = hashlib.sha256(provided_key.encode()).hexdigest()
+    
+    # Compare with stored hash (support both plain keys and hashed keys for backward compatibility)
+    if len(stored_hash) == 64 and all(c in '0123456789abcdef' for c in stored_hash.lower()):
+        # Stored hash appears to be a hex hash, compare hashes
+        return provided_hash == stored_hash.lower()
+    else:
+        # Stored value is plain text, compare directly (fallback for plain keys)
+        return provided_key == stored_hash
 
 # Pydantic models for agent communication
 class AgentRegistration(BaseModel):
@@ -45,31 +56,20 @@ async def authenticate_agent(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     api_key = credentials.credentials
-    api_key_hash = ph.hash(api_key)
     
-    # Check if agent exists in database
-    agent = await get_agent_by_hash(api_key_hash)
-    if not agent:
-        # Try to verify against all stored hashes (for backward compatibility)
-        agents = await get_agents()
-        for stored_agent in agents:
-            try:
-                ph.verify(stored_agent['api_key_hash'], api_key)
-                # Update agent status to online
-                await update_agent_status(stored_agent['api_key_hash'], 'online')
-                return api_key
-            except VerifyMismatchError:
-                continue
-        
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid agent API key.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # Try to verify against all stored agent hashes
+    agents = await get_agents()
+    for stored_agent in agents:
+        if verify_agent_api_key(api_key, stored_agent['api_key_hash']):
+            # Update agent status to online
+            await update_agent_status(stored_agent['api_key_hash'], 'online')
+            return api_key
     
-    # Update agent status to online
-    await update_agent_status(agent['api_key_hash'], 'online')
-    return api_key
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid agent API key.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 # Alternative authentication for WebSocket (via query param or header)
 async def authenticate_agent_websocket(websocket: WebSocket) -> bool:
@@ -88,13 +88,10 @@ async def authenticate_agent_websocket(websocket: WebSocket) -> bool:
     # Check against all stored agent hashes
     agents = await get_agents()
     for agent in agents:
-        try:
-            ph.verify(agent['api_key_hash'], api_key)
+        if verify_agent_api_key(api_key, agent['api_key_hash']):
             # Update agent status to online
             await update_agent_status(agent['api_key_hash'], 'online')
             return True
-        except VerifyMismatchError:
-            continue
     
     return False
 
