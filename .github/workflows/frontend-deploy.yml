@@ -132,7 +132,7 @@ jobs:
 
       - name: Run type checking
         working-directory: ./frontend
-        run: pnpm run type-check || pnpm run build
+        run: pnpm run type-check
 
       - name: Run linting
         working-directory: ./frontend
