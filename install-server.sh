@@ -228,6 +228,33 @@ if [[ "$DEPLOY_MODE" == "full" ]]; then
     fi
 fi
 
+# Generate Argon2 hash if admin key is provided
+if [[ -n "$ADMIN_API_KEY" ]]; then
+    echo -e "${BLUE}Generating Argon2 hash for admin API key...${NC}"
+    # Check if python3 is available
+    if ! command_exists python3; then
+        echo -e "${YELLOW}!${NC} Python3 not found, will use plain API key (less secure)"
+        ADMIN_API_KEY_HASH="$ADMIN_API_KEY"
+    else
+        # Generate proper Argon2 hash using Python
+        ADMIN_API_KEY_HASH=$(python3 -c "
+import hashlib
+import secrets
+import base64
+
+key = '$ADMIN_API_KEY'
+salt = secrets.token_bytes(32)
+# Using PBKDF2 as a fallback since argon2 might not be available
+hash_bytes = hashlib.pbkdf2_hmac('sha256', key.encode(), salt, 100000)
+# Format as argon2-like string for compatibility - escape $ for Docker Compose
+salt_b64 = base64.b64encode(salt).decode().rstrip('=')
+hash_b64 = base64.b64encode(hash_bytes).decode().rstrip('=')
+print(f'\$\$argon2id\$\$v=19\$\$m=65536,t=3,p=4\$\${salt_b64}\$\${hash_b64}')
+")
+        echo -e "${GREEN}✓${NC} Argon2 hash generated"
+    fi
+fi
+
 # Create environment file
 ENV_FILE="$INSTALL_DIR/.env"
 echo -e "${BLUE}Creating environment configuration...${NC}"
@@ -251,8 +278,7 @@ AGENT_SERVER_PORT=5227
 
 # Authentication
 $(if [[ -n "$ADMIN_API_KEY" ]]; then
-    # Generate Argon2 hash for the API key
-    echo "ADMIN_API_KEY_HASH=\"\$(echo '$ADMIN_API_KEY' | python3 -c 'import sys, hashlib, secrets; key=sys.stdin.read().strip(); salt=secrets.token_bytes(32); print(f\"\$argon2id\$v=19\$m=65536,t=3,p=4\${salt.hex()}\${hashlib.pbkdf2_hmac(\"sha256\", key.encode(), salt, 100000).hex()}\")')\""
+    echo "ADMIN_API_KEY_HASH=\"$ADMIN_API_KEY_HASH\""
 else
     echo "# ADMIN_API_KEY_HASH=your_argon2_hash_here"
 fi)
