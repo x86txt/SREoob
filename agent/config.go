@@ -27,7 +27,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	config := &Config{
-		UserAgent:       "SiteUp-Agent/1.0",
+		UserAgent:       "SREoob-Agent/1.0",
 		LogLevel:        "info",
 		AgentPort:       "8081", // Default agent port for local health checks
 		AgentServerPort: "5227", // New dedicated agent communication port

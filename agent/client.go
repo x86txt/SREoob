@@ -18,7 +18,7 @@ import (
 	"golang.org/x/net/http2"
 )
 
-// MasterClient handles communication with the master SiteUp API
+// MasterClient handles communication with the master SREoob API
 type MasterClient struct {
 	config      *Config
 	client      *http.Client

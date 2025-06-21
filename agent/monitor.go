@@ -130,7 +130,7 @@ func (m *Monitor) checkHTTPSite(ctx context.Context, site *Site) CheckResult {
 		return result
 	}
 
-	req.Header.Set("User-Agent", "SiteUp-Agent/1.0")
+	req.Header.Set("User-Agent", "SREoob-Agent/1.0")
 
 	resp, err := m.httpClient.Do(req)
 	responseTime := time.Since(start).Seconds()
@@ -340,7 +340,7 @@ func (m *Monitor) handleRealTimeUpdates() {
 
 // Start starts the monitoring system
 func (m *Monitor) Start() error {
-	log.Println("INFO: Starting SiteUp monitoring agent")
+	log.Println("INFO: Starting SREoob monitoring agent")
 
 	// Initial fetch and start monitoring
 	if err := m.RefreshSites(m.ctx); err != nil {
