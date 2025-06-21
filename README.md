@@ -108,14 +108,49 @@ docker-compose up --build
 
 ## ⚙️ Configuration
 
+### 🔧 Environment Configuration
+
+Create a `.env` file in the backend directory for custom settings:
+
+```bash
+# Copy the example configuration
+cp backend/env-example backend/.env
+```
+
+#### ⚙️ **Key Configuration Options**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `SCAN_RANGE_MIN` | `"30s"` | 🕒 Minimum interval between site checks |
+| `SCAN_RANGE_MAX` | `"5m"` | 🕒 Maximum interval between site checks |
+| `DATABASE_PATH` | `siteup.db` | 🗄️ SQLite database file location |
+| `LOG_LEVEL` | `INFO` | 📝 Logging verbosity (DEBUG/INFO/WARNING/ERROR) |
+
+#### 🚀 **Environment Profiles**
+
+**Production** (default):
+```bash
+SCAN_RANGE_MIN="30s"
+SCAN_RANGE_MAX="5m"
+```
+
+**Development** (for testing):
+```bash
+SCAN_RANGE_MIN="1s"
+SCAN_RANGE_MAX="1h"
+```
+
+> 💡 **Time formats**: Use `s` (seconds), `m` (minutes), `h` (hours). Decimals supported: `0.5s`, `2.5m`, `1.5h`
+
 ### 🔧 Backend Configuration
 
 The backend automatically handles everything! 🎉
 
 - ✅ Creates SQLite database on first run
-- ⏰ Starts monitoring all sites every 60 seconds
+- ⏰ Starts monitoring all sites based on their individual intervals
 - 🚀 Handles up to 100 concurrent site checks
 - 💾 Stores unlimited historical data
+- ⚙️ Configurable via environment variables
 
 ### 🎨 Frontend Configuration 
 
@@ -124,6 +159,7 @@ The frontend seamlessly connects via:
 - 🔄 API proxy in `next.config.js` (development)
 - 🌐 Direct API calls to `/api/*` endpoints
 - ⚡ Auto-refresh every 30 seconds for real-time updates
+- 🎛️ Dynamic configuration via `/api/config` endpoint
 
 ## 🗄️ Database Schema
 

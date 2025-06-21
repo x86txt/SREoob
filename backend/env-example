@@ -1,0 +1,63 @@
+# SiteUp Monitor - Environment Configuration Example
+# =================================================
+# Copy this file to .env and modify values as needed
+# All settings have sensible defaults if not specified
+
+# Database Configuration
+# =====================
+DATABASE_PATH=siteup.db
+DATABASE_URL=postgresql://user:password@localhost/siteup
+
+# Scan Interval Validation Ranges
+# ===============================
+# These control the allowed range when users add new sites to monitor
+# Use human-readable time formats: s (seconds), m (minutes), h (hours)
+# Decimal values are supported (e.g., "0.5s", "2.5m", "1.5h")
+
+# PRODUCTION SETTINGS (recommended for live environments)
+# Conservative ranges to prevent server overload
+SCAN_RANGE_MIN="30s"     # 30 seconds minimum
+SCAN_RANGE_MAX="5m"      # 5 minutes maximum
+
+# DEVELOPMENT SETTINGS (uncomment for development/testing)
+# Flexible ranges for testing and development
+# SCAN_RANGE_MIN="1s"      # 1 second minimum (fast testing)
+# SCAN_RANGE_MAX="1h"      # 1 hour maximum (long intervals)
+
+# CUSTOM EXAMPLES (mix and match as needed)
+# SCAN_RANGE_MIN="0.5s"    # 500ms minimum (ultra-fast)
+# SCAN_RANGE_MAX="2h"      # 2 hours maximum (very long)
+# SCAN_RANGE_MIN="1m"      # 1 minute minimum (conservative)
+# SCAN_RANGE_MAX="10m"     # 10 minutes maximum (conservative)
+
+# API Server Configuration
+# ========================
+API_PORT=8000
+API_HOST=0.0.0.0
+
+# Logging Configuration
+# ====================
+# Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL=INFO
+
+# SMTP Configuration
+# ====================
+# Options: we support Sendgrid/Twilio
+SENDGRID_API_KEY="SG.blahblah"
+
+# Development vs Production Notes
+# ==============================
+# 
+# PRODUCTION:
+# - Use conservative scan ranges (30s-5m) to prevent server overload
+# - Set LOG_LEVEL=WARNING or ERROR to reduce log noise
+#
+# DEVELOPMENT:
+# - Use flexible scan ranges (1s-1h) for testing different scenarios
+# - Set LOG_LEVEL=DEBUG for detailed logging
+#
+# TESTING:
+# - Use ultra-fast ranges (0.5s-2h) for rapid iteration
+# - Set LOG_LEVEL=DEBUG for maximum visibility
+
+ADMIN_API_KEY_HASH=your_argon2_hash_here

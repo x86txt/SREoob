@@ -1,192 +1,251 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Plus, RefreshCw, Activity, Globe, Clock, AlertCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { getSitesStatus, getMonitorStats, createSite, deleteSite, triggerManualCheck } from '@/lib/api';
+import { type SiteStatus, type MonitorStats, type CreateSiteRequest } from '@/lib/api';
 import { AddSiteDialog } from '@/components/AddSiteDialog';
-import { SitesList } from '@/components/SitesList';
-import { StatusPanel } from '@/components/StatusPanel';
-import { getSitesStatus, getMonitorStats, triggerManualCheck, type SiteStatus, type MonitorStats } from '@/lib/api';
+import { DeleteSitesDialog } from '@/components/DeleteSitesDialog';
+import { MetricsCards } from '@/components/dashboard/metrics-cards';
+import { ResponseTimeChart } from '@/components/dashboard/response-time-chart';
+import { SitesTable } from '@/components/dashboard/sites-table';
+import { ThemeToggle } from '@/components/theme-toggle';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Activity, Plus, RefreshCw, Trash2, Clock } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 export default function Home() {
   const [sites, setSites] = useState<SiteStatus[]>([]);
   const [stats, setStats] = useState<MonitorStats | null>(null);
-  const [selectedSite, setSelectedSite] = useState<SiteStatus | null>(null);
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState('30');
+  const { isAuthenticated } = useAuth();
+
+  const AUTO_REFRESH_OPTIONS = [
+    { value: 'off', label: 'Off' },
+    { value: '1', label: '1s' },
+    { value: '5', label: '5s' },
+    { value: '10', label: '10s' },
+    { value: '30', label: '30s' },
+    { value: '60', label: '1m' },
+    { value: '300', label: '5m' },
+    { value: '600', label: '10m' },
+    { value: '1800', label: '30m' },
+    { value: '3600', label: '1h' }
+  ];
 
   const fetchData = async () => {
     try {
+      setError(null);
       const [sitesData, statsData] = await Promise.all([
         getSitesStatus(),
         getMonitorStats()
       ]);
       setSites(sitesData);
       setStats(statsData);
-      
-      // Auto-select first site if none selected
-      if (!selectedSite && sitesData.length > 0) {
-        setSelectedSite(sitesData[0]);
-      }
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch data');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
+    }
+  };
+
+  const handleAddSite = async (siteData: CreateSiteRequest) => {
+    try {
+      await createSite(siteData);
+      await fetchData();
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const handleDeleteSite = async (id: number) => {
+    try {
+      await deleteSite(id);
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete site');
+    }
+  };
+
+  const handleManualCheck = async () => {
+    setIsChecking(true);
+    try {
+      await triggerManualCheck();
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to trigger manual check');
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  const handleCheckSite = async (id: number) => {
+    // For now, trigger a full manual check
+    // In a real app, you might want to check just this site
+    await handleManualCheck();
+  };
+
+  const handleDeleteSelectedSites = async (siteIds: number[]) => {
+    try {
+      // Delete selected sites one by one
+      for (const siteId of siteIds) {
+        await deleteSite(siteId);
+      }
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete sites');
+      throw err; // Re-throw so the dialog can handle it
     }
   };
 
   useEffect(() => {
     fetchData();
     
-    // Refresh data every 30 seconds
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleManualCheck = async () => {
-    setIsChecking(true);
-    try {
-      await triggerManualCheck();
-      await fetchData(); // Refresh data after check
-    } catch (error) {
-      console.error('Failed to trigger manual check:', error);
-    } finally {
-      setIsChecking(false);
+    if (autoRefreshInterval === 'off') {
+      return; // No auto-refresh
     }
-  };
+    
+    const intervalMs = parseInt(autoRefreshInterval) * 1000;
+    const interval = setInterval(fetchData, intervalMs);
+    return () => clearInterval(interval);
+  }, [autoRefreshInterval]);
 
-  const handleSiteAdded = () => {
-    fetchData(); // Refresh data when new site is added
-  };
-
-  const handleSiteDeleted = () => {
-    fetchData(); // Refresh data when site is deleted
-    setSelectedSite(null); // Clear selection
-  };
-
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex h-screen items-center justify-center">
         <div className="flex items-center space-x-2">
-          <RefreshCw className="h-4 w-4 animate-spin" />
-          <span>Loading...</span>
+          <Activity className="h-6 w-6 animate-pulse text-primary" />
+          <span className="text-lg">Loading monitoring data...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-screen">
+    <>
       {/* Header */}
-      <header className="border-b bg-white px-6 py-4">
+      <header className="border-b bg-card px-6 py-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Activity className="h-6 w-6 text-blue-600" />
-            <h1 className="text-2xl font-bold">SiteUp Monitor</h1>
+          <div>
+            <h1 className="text-2xl font-semibold">Dashboard</h1>
+            <p className="text-muted-foreground">
+              Website uptime monitoring overview
+            </p>
           </div>
-          
-          <div className="flex items-center space-x-4">
-            {/* Stats */}
-            {stats && (
-              <div className="flex items-center space-x-4 text-sm">
-                <div className="flex items-center space-x-1">
-                  <Globe className="h-4 w-4 text-gray-500" />
-                  <span>{stats.total_sites} sites</span>
-                </div>
-                <div className="flex items-center space-x-1">
-                  <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                  <span>{stats.sites_up} up</span>
-                </div>
-                <div className="flex items-center space-x-1">
-                  <div className="h-2 w-2 rounded-full bg-red-500"></div>
-                  <span>{stats.sites_down} down</span>
-                </div>
-                {stats.average_response_time && (
-                  <div className="flex items-center space-x-1">
-                    <Clock className="h-4 w-4 text-gray-500" />
-                    <span>{Math.round(stats.average_response_time * 1000)}ms avg</span>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {/* Actions */}
+          <div className="flex items-center space-x-2">
             <Button
+              onClick={() => setShowAddDialog(true)}
+              size="sm"
+              className="flex items-center space-x-2"
+              disabled={!isAuthenticated}
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add Site</span>
+            </Button>
+            <Button
+              onClick={() => setShowDeleteDialog(true)}
+              variant="destructive"
+              size="sm"
+              disabled={sites.length === 0 || !isAuthenticated}
+              className="flex items-center space-x-2"
+            >
+              <Trash2 className="h-4 w-4" />
+              <span>Delete Sites</span>
+            </Button>
+            <Button
+              onClick={handleManualCheck}
               variant="outline"
               size="sm"
-              onClick={handleManualCheck}
-              disabled={isChecking}
+              disabled={isChecking || !isAuthenticated}
+              className="flex items-center space-x-2"
             >
-              <RefreshCw className={`h-4 w-4 mr-2 ${isChecking ? 'animate-spin' : ''}`} />
-              Check Now
+              <RefreshCw className={`h-4 w-4 ${isChecking ? 'animate-spin' : ''}`} />
+              <span>{isChecking ? 'Checking...' : 'Check Now'}</span>
             </Button>
-            
-            <Button size="sm" onClick={() => setIsAddDialogOpen(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Site
-            </Button>
+            <div className="flex items-center space-x-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <Select value={autoRefreshInterval} onValueChange={setAutoRefreshInterval}>
+                <SelectTrigger className="w-20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <div className="px-2 py-1.5 text-sm font-medium text-muted-foreground border-b">
+                    Auto-refresh interval
+                  </div>
+                  {AUTO_REFRESH_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <ThemeToggle />
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - Sites List */}
-        <div className="w-80 border-r bg-gray-50/40 flex flex-col">
-          <div className="p-4 border-b bg-white">
-            <h2 className="font-semibold">Monitored Sites</h2>
-            <p className="text-sm text-gray-600 mt-1">
-              {sites.length} site{sites.length !== 1 ? 's' : ''} being monitored
-            </p>
-          </div>
-          
-          <div className="flex-1 overflow-auto">
-            <SitesList
-              sites={sites}
-              selectedSite={selectedSite}
-              onSiteSelect={setSelectedSite}
-              onSiteDeleted={handleSiteDeleted}
-            />
-          </div>
-        </div>
+      {/* Content */}
+      <main className="p-6 space-y-6">
+        {error && (
+          <Card className="border-destructive bg-destructive/10">
+            <CardContent className="p-4">
+              <p className="text-destructive">{error}</p>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Right Panel - Status Details */}
-        <div className="flex-1 flex flex-col">
-          {selectedSite ? (
-            <StatusPanel site={selectedSite} />
-          ) : (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  No Site Selected
-                </h3>
-                <p className="text-gray-600">
-                  {sites.length === 0
-                    ? "Add your first site to start monitoring"
-                    : "Select a site from the sidebar to view its status"
-                  }
-                </p>
-                {sites.length === 0 && (
-                  <Button className="mt-4" onClick={() => setIsAddDialogOpen(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Your First Site
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+        {/* Metrics Cards */}
+        <MetricsCards stats={stats} sites={sites} />
+
+        {/* Response Time Chart */}
+        {sites.length > 0 && <ResponseTimeChart sites={sites} />}
+
+        {/* Sites Table */}
+        <SitesTable
+          sites={sites}
+          onDeleteSite={handleDeleteSite}
+          onCheckSite={handleCheckSite}
+          isChecking={isChecking}
+        />
+
+        {sites.length === 0 && !error && (
+          <Card>
+            <CardContent className="p-12 text-center">
+              <Activity className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium mb-2">No sites configured yet</h3>
+              <p className="text-muted-foreground mb-6">
+                Start monitoring your websites by adding your first site.
+              </p>
+              <Button onClick={() => setShowAddDialog(true)} className="flex items-center space-x-2" disabled={!isAuthenticated}>
+                <Plus className="h-4 w-4" />
+                <span>Add Your First Site</span>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+      </main>
 
       {/* Add Site Dialog */}
       <AddSiteDialog
-        open={isAddDialogOpen}
-        onOpenChange={setIsAddDialogOpen}
-        onSiteAdded={handleSiteAdded}
+        open={showAddDialog}
+        onOpenChange={setShowAddDialog}
+        onSiteAdded={fetchData}
       />
-    </div>
+
+      {/* Delete Sites Dialog */}
+      <DeleteSitesDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        sites={sites}
+        onDeleteSites={handleDeleteSelectedSites}
+      />
+    </>
   );
 } 

@@ -2,8 +2,9 @@ import aiosqlite
 import asyncio
 from typing import List, Dict, Any
 from datetime import datetime
+from .config import settings
 
-DATABASE_PATH = "siteup.db"
+DATABASE_PATH = settings.DATABASE_PATH
 
 async def init_database():
     """Initialize the SQLite database and create tables if they don't exist."""
@@ -13,9 +14,19 @@ async def init_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
+                scan_interval TEXT DEFAULT '60s',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # Check if scan_interval column exists and add it if not (for migration)
+        cursor = await db.execute("PRAGMA table_info(sites)")
+        columns = await cursor.fetchall()
+        column_names = [column[1] for column in columns]
+        
+        if 'scan_interval' not in column_names:
+            await db.execute("ALTER TABLE sites ADD COLUMN scan_interval TEXT DEFAULT '60s'")
+            print("Added scan_interval column to existing sites table")
         
         await db.execute("""
             CREATE TABLE IF NOT EXISTS site_checks (
@@ -32,12 +43,12 @@ async def init_database():
         
         await db.commit()
 
-async def add_site(url: str, name: str) -> int:
+async def add_site(url: str, name: str, scan_interval: str = "60s") -> int:
     """Add a new site to monitor."""
     async with aiosqlite.connect(DATABASE_PATH) as db:
         cursor = await db.execute(
-            "INSERT INTO sites (url, name) VALUES (?, ?)",
-            (url, name)
+            "INSERT INTO sites (url, name, scan_interval) VALUES (?, ?, ?)",
+            (url, name, scan_interval)
         )
         await db.commit()
         return cursor.lastrowid
@@ -69,6 +80,7 @@ async def get_site_status() -> List[Dict[str, Any]]:
                 s.id,
                 s.url,
                 s.name,
+                s.scan_interval,
                 s.created_at,
                 sc.status,
                 sc.response_time,
