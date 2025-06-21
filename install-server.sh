@@ -16,8 +16,8 @@ NC='\033[0m' # No Color
 
 # Configuration
 GITHUB_REPO="x86txt/SREoob"
-COMPOSE_URL="https://github.com/${GITHUB_REPO}/releases/latest/download/docker-compose.yml"
-NGINX_CONFIG_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main/nginx/nginx.conf"
+COMPOSE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/refs/heads/main/docker-compose.yml"
+NGINX_CONFIG_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/refs/heads/main/nginx/nginx.conf"
 
 # Banner
 echo -e "${PURPLE}"
@@ -342,7 +342,7 @@ if [[ -n "$ADMIN_API_KEY" ]]; then
 fi
 
 echo -e "${YELLOW}$(if [[ -n "$ADMIN_API_KEY" ]]; then echo "4"; else echo "3"; fi). Deploy monitoring agents:${NC}"
-echo -e "   ${CYAN}curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPO}/main/agent/install.sh | bash${NC}"
+echo -e "   ${CYAN}curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPO}/refs/heads/main/agent/install.sh | bash${NC}"
 echo ""
 
 echo -e "${YELLOW}$(if [[ -n "$ADMIN_API_KEY" ]]; then echo "5"; else echo "4"; fi). Manage your deployment:${NC}"

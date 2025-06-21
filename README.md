@@ -10,7 +10,7 @@ Keep your websites online and your mind at peace! 😌 Built with <svg width="20
 **Deploy the entire SREoob platform with guided setup:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/x86txt/SREoob/main/install-server.sh | bash
+curl -fsSL https://raw.githubusercontent.com/x86txt/SREoob/refs/heads/main/install-server.sh | bash
 ```
 
 ✅ **Interactive setup** • ✅ **SSL/HTTPS support** • ✅ **Admin authentication** • ✅ **Complete stack or individual components** • ✅ **Production-ready nginx**
@@ -27,7 +27,7 @@ curl -fsSL https://github.com/x86txt/SREoob/releases/latest/download/docker-comp
 **Deploy a monitoring agent in 30 seconds:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/x86txt/SREoob/main/agent/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/x86txt/SREoob/refs/heads/main/agent/install.sh | bash
 ```
 
 ✅ **Auto-detects your platform** • ✅ **Downloads pre-compiled binary** • ✅ **Generates secure API key** • ✅ **Creates systemd service** • ✅ **Provides clear next steps**

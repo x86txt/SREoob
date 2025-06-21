@@ -282,7 +282,7 @@ jobs:
             ghcr.io/x86txt/sreoob-frontend:$VERSION
           
           # Agent (Quick Install)
-          curl -fsSL https://raw.githubusercontent.com/x86txt/SREoob/main/agent/install.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/x86txt/SREoob/refs/heads/main/agent/install.sh | bash
           \`\`\`
           
           ## 📦 What's Included

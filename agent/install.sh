@@ -203,7 +203,10 @@ AGENT_NAME=$AGENT_NAME
 AGENT_DESCRIPTION=$AGENT_DESCRIPTION
 EOF
 
+# Set secure permissions (readable only by owner)
+chmod 600 "$CONFIG_FILE"
 echo -e "${GREEN}✓${NC} Configuration saved to: $CONFIG_FILE"
+echo -e "${GREEN}✓${NC} Secure permissions set (600 - owner read/write only)"
 echo ""
 
 # Create systemd service (Linux only)
@@ -251,8 +254,10 @@ EOF
         echo -e "${GREEN}✓${NC} Created sreoob system user"
     fi
     
-    # Set permissions
+    # Set ownership and ensure secure permissions are maintained
     chown -R sreoob:sreoob "$CONFIG_DIR"
+    chmod 600 "$CONFIG_FILE"  # Re-apply secure permissions after ownership change
+    echo -e "${GREEN}✓${NC} Ownership set to sreoob user with secure permissions"
     
     echo -e "${GREEN}✓${NC} Systemd service created"
     echo ""
