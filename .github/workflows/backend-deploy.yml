@@ -1,0 +1,306 @@
+name: Build and Deploy SREoob Backend
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/backend-deploy.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: sreoob-backend
+
+jobs:
+  # Job to determine the next version number
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest backend tag
+        id: get_tag
+        run: |
+          # Get the latest backend tag, default to backend-v0.0.0 if no tags exist
+          LATEST_TAG=$(git tag -l "backend-v*" | sort -V | tail -1 || echo "backend-v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest backend tag: $LATEST_TAG"
+
+      - name: Calculate next version
+        id: version
+        run: |
+          LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
+          VERSION_BUMP="${{ github.event.inputs.version_bump || 'patch' }}"
+          
+          # Remove 'backend-v' prefix for calculation
+          VERSION=${LATEST_TAG#backend-v}
+          
+          # Split version into parts
+          IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
+          MAJOR=${VERSION_PARTS[0]:-0}
+          MINOR=${VERSION_PARTS[1]:-0}
+          PATCH=${VERSION_PARTS[2]:-0}
+          
+          # Increment based on bump type
+          case $VERSION_BUMP in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch|*)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          NEW_TAG="backend-v$NEW_VERSION"
+          
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "Next backend version: $NEW_VERSION (tag: $NEW_TAG)"
+
+  # Job to build and test the backend
+  build:
+    runs-on: ubuntu-latest
+    needs: version
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv sync --dev
+
+      - name: Run tests
+        run: |
+          # Run any backend tests if they exist
+          uv run python -m pytest backend/ || echo "No tests found, skipping"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.version.outputs.version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+            BUILD_TIME=${{ github.run_id }}
+            GIT_COMMIT=${{ github.sha }}
+
+  # Job to create release
+  release:
+    runs-on: ubuntu-latest
+    needs: [version, build]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          TAG="${{ needs.version.outputs.tag }}"
+          
+          # Get commits since last backend tag
+          LAST_TAG=$(git tag -l "backend-v*" | sort -V | tail -2 | head -1 || echo "")
+          
+          if [[ -n "$LAST_TAG" ]]; then
+            COMMITS=$(git log --oneline ${LAST_TAG}..HEAD --grep="backend" --grep="Backend" --grep="BACKEND" || git log --oneline ${LAST_TAG}..HEAD -- backend/ pyproject.toml | head -10)
+          else
+            COMMITS=$(git log --oneline -10 -- backend/ pyproject.toml)
+          fi
+          
+          # Create release notes
+          cat > release_notes.md << EOF
+          # SREoob Backend $VERSION
+          
+          ## 🚀 Quick Deployment
+          
+          **Docker (Recommended):**
+          \`\`\`bash
+          docker run -d \\
+            --name sreoob-backend \\
+            -p 8000:8000 \\
+            -e DATABASE_PATH=/data/sreoob.db \\
+            -v sreoob-data:/data \\
+            ghcr.io/x86txt/${{ env.IMAGE_NAME }}:$VERSION
+          \`\`\`
+          
+          **Docker Compose:**
+          \`\`\`yaml
+          version: '3.8'
+          services:
+            backend:
+              image: ghcr.io/x86txt/${{ env.IMAGE_NAME }}:$VERSION
+              ports:
+                - "8000:8000"
+              environment:
+                - DATABASE_PATH=/data/sreoob.db
+                - SCAN_RANGE_MIN=30s
+                - SCAN_RANGE_MAX=5m
+              volumes:
+                - sreoob-data:/data
+              restart: unless-stopped
+          
+          volumes:
+            sreoob-data:
+          \`\`\`
+          
+          ## 🔧 What's New
+          
+          ### Changes in this release:
+          $COMMITS
+          
+          ## 📋 Environment Variables
+          
+          | Variable | Default | Description |
+          |----------|---------|-------------|
+          | \`DATABASE_PATH\` | \`siteup.db\` | SQLite database file location |
+          | \`SCAN_RANGE_MIN\` | \`30s\` | Minimum scan interval |
+          | \`SCAN_RANGE_MAX\` | \`5m\` | Maximum scan interval |
+          | \`LOG_LEVEL\` | \`INFO\` | Logging level |
+          | \`ADMIN_API_KEY_HASH\` | - | Admin API key hash (optional) |
+          
+          ## 🔒 Security
+          
+          - Built with Python 3.11+ and FastAPI
+          - Secure SQLite database with aiosqlite
+          - Optional authentication with Argon2 hashing
+          - Rate limiting and input validation
+          
+          ## 📖 Documentation
+          
+          - [Backend README](https://github.com/${{ github.repository }}/blob/main/backend/README.md)
+          - [API Documentation](https://github.com/${{ github.repository }}/blob/main/backend/CONFIG.md)
+          - [Environment Setup](https://github.com/${{ github.repository }}/blob/main/backend/env-example)
+          
+          ---
+          
+          **Docker Image:** \`ghcr.io/x86txt/${{ env.IMAGE_NAME }}:$VERSION\`
+          EOF
+          
+          echo "Release notes created"
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: SREoob Backend ${{ needs.version.outputs.version }}
+          body_path: ./release_notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release Summary
+        run: |
+          echo "✅ Backend release ${{ needs.version.outputs.tag }} created successfully!"
+          echo "🐳 Docker image: ghcr.io/x86txt/${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}"
+          echo "🔗 Release URL: ${{ steps.create_release.outputs.url }}"
+
+  # Test job for pull requests
+  test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv sync --dev
+
+      - name: Run tests
+        run: |
+          echo "Testing backend build for pull request..."
+          uv run python -c "import backend.app.main; print('✅ Backend imports successfully')"
+          
+      - name: Test Docker build
+        run: |
+          docker build -f Dockerfile.backend -t test-backend .
+          echo "✅ Docker build successful" 

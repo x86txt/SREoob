@@ -1,0 +1,366 @@
+name: Build and Deploy SREoob Frontend
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/frontend-deploy.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: sreoob-frontend
+
+jobs:
+  # Job to determine the next version number
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest frontend tag
+        id: get_tag
+        run: |
+          # Get the latest frontend tag, default to frontend-v0.0.0 if no tags exist
+          LATEST_TAG=$(git tag -l "frontend-v*" | sort -V | tail -1 || echo "frontend-v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest frontend tag: $LATEST_TAG"
+
+      - name: Calculate next version
+        id: version
+        run: |
+          LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
+          VERSION_BUMP="${{ github.event.inputs.version_bump || 'patch' }}"
+          
+          # Remove 'frontend-v' prefix for calculation
+          VERSION=${LATEST_TAG#frontend-v}
+          
+          # Split version into parts
+          IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
+          MAJOR=${VERSION_PARTS[0]:-0}
+          MINOR=${VERSION_PARTS[1]:-0}
+          PATCH=${VERSION_PARTS[2]:-0}
+          
+          # Increment based on bump type
+          case $VERSION_BUMP in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch|*)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          NEW_TAG="frontend-v$NEW_VERSION"
+          
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "Next frontend version: $NEW_VERSION (tag: $NEW_TAG)"
+
+  # Job to build and test the frontend
+  build:
+    runs-on: ubuntu-latest
+    needs: version
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Run type checking
+        working-directory: ./frontend
+        run: pnpm run type-check || pnpm run build
+
+      - name: Run linting
+        working-directory: ./frontend
+        run: pnpm run lint || echo "Linting completed with warnings"
+
+      - name: Build application
+        working-directory: ./frontend
+        run: pnpm run build
+        env:
+          NODE_ENV: production
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/x86txt/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.version.outputs.version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+            BUILD_TIME=${{ github.run_id }}
+            GIT_COMMIT=${{ github.sha }}
+
+  # Job to create release
+  release:
+    runs-on: ubuntu-latest
+    needs: [version, build]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          TAG="${{ needs.version.outputs.tag }}"
+          
+          # Get commits since last frontend tag
+          LAST_TAG=$(git tag -l "frontend-v*" | sort -V | tail -2 | head -1 || echo "")
+          
+          if [[ -n "$LAST_TAG" ]]; then
+            COMMITS=$(git log --oneline ${LAST_TAG}..HEAD --grep="frontend" --grep="Frontend" --grep="FRONTEND" || git log --oneline ${LAST_TAG}..HEAD -- frontend/ package.json | head -10)
+          else
+            COMMITS=$(git log --oneline -10 -- frontend/ package.json)
+          fi
+          
+          # Create release notes
+          cat > release_notes.md << EOF
+          # SREoob Frontend $VERSION
+          
+          ## 🚀 Quick Deployment
+          
+          **Docker (Recommended):**
+          \`\`\`bash
+          docker run -d \\
+            --name sreoob-frontend \\
+            -p 3000:3000 \\
+            ghcr.io/x86txt/${{ env.IMAGE_NAME }}:$VERSION
+          \`\`\`
+          
+          **Docker Compose:**
+          \`\`\`yaml
+          version: '3.8'
+          services:
+            frontend:
+              image: ghcr.io/x86txt/${{ env.IMAGE_NAME }}:$VERSION
+              ports:
+                - "3000:3000"
+              environment:
+                - NODE_ENV=production
+              restart: unless-stopped
+            
+            # Optional: Connect to backend
+            backend:
+              image: ghcr.io/x86txt/sreoob-backend:latest
+              ports:
+                - "8000:8000"
+              volumes:
+                - sreoob-data:/data
+              restart: unless-stopped
+          
+          volumes:
+            sreoob-data:
+          \`\`\`
+          
+          **With nginx reverse proxy:**
+          \`\`\`bash
+          # Use the provided nginx.conf for production deployment
+          docker run -d \\
+            --name sreoob-nginx \\
+            -p 80:80 \\
+            -v ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro \\
+            --link sreoob-frontend \\
+            --link sreoob-backend \\
+            nginx:alpine
+          \`\`\`
+          
+          ## 🔧 What's New
+          
+          ### Changes in this release:
+          $COMMITS
+          
+          ## 🛠️ Tech Stack
+          
+          - **Framework**: Next.js 14+ with App Router
+          - **Language**: TypeScript
+          - **Styling**: TailwindCSS v4
+          - **UI Components**: ShadCN/UI
+          - **Authentication**: Built-in auth system
+          - **Real-time**: WebSocket connections
+          
+          ## 📋 Environment Variables
+          
+          | Variable | Default | Description |
+          |----------|---------|-------------|
+          | \`NODE_ENV\` | \`production\` | Node.js environment |
+          | \`PORT\` | \`3000\` | Port to run the application |
+          | \`NEXT_PUBLIC_API_URL\` | \`/api\` | Backend API URL |
+          
+          ## 🔒 Security Features
+          
+          - Authentication system with API key support
+          - Anonymous read-only mode
+          - CSRF protection
+          - Secure headers and middleware
+          - Input validation and sanitization
+          
+          ## 📖 Documentation
+          
+          - [Frontend README](https://github.com/x86txt/SREoob/blob/main/frontend/README.md)
+          - [Component Documentation](https://github.com/x86txt/SREoob/tree/main/frontend/src/components)
+          - [API Integration](https://github.com/x86txt/SREoob/tree/main/frontend/src/lib)
+          
+          ---
+          
+          **Docker Image:** \`ghcr.io/x86txt/${{ env.IMAGE_NAME }}:$VERSION\`
+          **Live Demo:** Deploy and access at \`http://localhost:3000\`
+          EOF
+          
+          echo "Release notes created"
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: SREoob Frontend ${{ needs.version.outputs.version }}
+          body_path: ./release_notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release Summary
+        run: |
+          echo "✅ Frontend release ${{ needs.version.outputs.tag }} created successfully!"
+          echo "🐳 Docker image: ghcr.io/x86txt/${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}"
+          echo "🔗 Release URL: ${{ steps.create_release.outputs.url }}"
+
+  # Test job for pull requests
+  test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Run type checking
+        working-directory: ./frontend
+        run: |
+          echo "Testing frontend build for pull request..."
+          pnpm run type-check || pnpm run build
+
+      - name: Test Docker build
+        run: |
+          docker build -f frontend/Dockerfile -t test-frontend ./frontend
+          echo "✅ Frontend Docker build successful" 

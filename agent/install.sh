@@ -107,7 +107,7 @@ while true; do
     echo -e "  • https://monitoring.company.com"
     echo -e "  • http://192.168.1.100:8000"
     echo ""
-    read -p "Master URL: " MASTER_URL
+    read -p "Master URL: " MASTER_URL < /dev/tty
     
     if [[ -z "$MASTER_URL" ]]; then
         echo -e "${RED}✗${NC} Master URL cannot be empty"
@@ -132,7 +132,7 @@ while true; do
     echo -e "  • EU West Agent"
     echo -e "  • Office Network Monitor"
     echo ""
-    read -p "Agent Name: " AGENT_NAME
+    read -p "Agent Name: " AGENT_NAME < /dev/tty
     
     if [[ -z "$AGENT_NAME" ]]; then
         echo -e "${RED}✗${NC} Agent name cannot be empty"
@@ -145,7 +145,7 @@ echo ""
 
 # Optional description
 echo -e "${CYAN}Enter a description for this agent (optional):${NC}"
-read -p "Description: " AGENT_DESCRIPTION
+read -p "Description: " AGENT_DESCRIPTION < /dev/tty
 echo ""
 
 # Create directories

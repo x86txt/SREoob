@@ -1,0 +1,410 @@
+name: Build and Deploy Full SREoob Stack
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'agent/**'
+      - 'docker-compose.yml'
+      - 'nginx/**'
+      - 'pyproject.toml'
+      - 'package.json'
+      - '.github/workflows/full-stack-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type for full stack'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # Job to determine the next version number
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest stack tag
+        id: get_tag
+        run: |
+          # Get the latest stack tag, default to stack-v0.0.0 if no tags exist
+          LATEST_TAG=$(git tag -l "stack-v*" | sort -V | tail -1 || echo "stack-v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest stack tag: $LATEST_TAG"
+
+      - name: Calculate next version
+        id: version
+        run: |
+          LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
+          VERSION_BUMP="${{ github.event.inputs.version_bump || 'patch' }}"
+          
+          # Remove 'stack-v' prefix for calculation
+          VERSION=${LATEST_TAG#stack-v}
+          
+          # Split version into parts
+          IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
+          MAJOR=${VERSION_PARTS[0]:-0}
+          MINOR=${VERSION_PARTS[1]:-0}
+          PATCH=${VERSION_PARTS[2]:-0}
+          
+          # Increment based on bump type
+          case $VERSION_BUMP in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch|*)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          NEW_TAG="stack-v$NEW_VERSION"
+          
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "Next stack version: $NEW_VERSION (tag: $NEW_TAG)"
+
+  # Build all components in parallel
+  build-backend:
+    runs-on: ubuntu-latest
+    needs: version
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/x86txt/sreoob-backend:${{ needs.version.outputs.version }}
+            ${{ env.REGISTRY }}/x86txt/sreoob-backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    needs: version
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/x86txt/sreoob-frontend:${{ needs.version.outputs.version }}
+            ${{ env.REGISTRY }}/x86txt/sreoob-frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  build-agent:
+    runs-on: ubuntu-latest
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            name: sreoob-agent-linux-amd64
+          - goos: linux
+            goarch: arm64
+            name: sreoob-agent-linux-arm64
+          - goos: linux
+            goarch: arm
+            goarm: 7
+            name: sreoob-agent-linux-arm
+          - goos: linux
+            goarch: riscv64
+            name: sreoob-agent-linux-riscv64
+          - goos: darwin
+            goarch: arm64
+            name: sreoob-agent-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            name: sreoob-agent-windows-amd64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build agent binary
+        working-directory: ./agent
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          GIT_COMMIT=$(git rev-parse --short HEAD)
+          
+          LDFLAGS="-s -w -X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME -X main.GitCommit=$GIT_COMMIT"
+          
+          go build -ldflags="$LDFLAGS" -o ${{ matrix.name }} .
+
+      - name: Upload agent binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: agent/${{ matrix.name }}
+          retention-days: 1
+
+  # Create comprehensive release
+  release:
+    runs-on: ubuntu-latest
+    needs: [version, build-backend, build-frontend, build-agent]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all agent binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: ./agent-binaries
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p ./release-assets
+          
+          # Move all agent binaries to release assets directory
+          find ./agent-binaries -name "sreoob-agent-*" -type f -exec cp {} ./release-assets/ \;
+          
+          # Create checksums
+          cd ./release-assets
+          sha256sum * > SHA256SUMS
+          cd ..
+          
+          # Copy deployment files
+          cp docker-compose.yml ./release-assets/
+          cp -r nginx ./release-assets/
+          
+          echo "Release assets prepared:"
+          ls -la ./release-assets/
+
+      - name: Generate comprehensive release notes
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          TAG="${{ needs.version.outputs.tag }}"
+          
+          # Get commits since last stack tag
+          LAST_TAG=$(git tag -l "stack-v*" | sort -V | tail -2 | head -1 || echo "")
+          
+          if [[ -n "$LAST_TAG" ]]; then
+            COMMITS=$(git log --oneline ${LAST_TAG}..HEAD | head -15)
+          else
+            COMMITS=$(git log --oneline -15)
+          fi
+          
+          cat > release_notes.md << EOF
+          # 🚀 SREoob Full Stack Release $VERSION
+          
+          Complete monitoring platform with backend, frontend, and cross-platform agent.
+          
+          ## 🎯 Quick Start - Complete Stack
+          
+          **Option 1: Docker Compose (Recommended)**
+          \`\`\`bash
+          # Download and run the complete stack
+          curl -fsSL https://github.com/x86txt/SREoob/releases/download/$TAG/docker-compose.yml -o docker-compose.yml
+          docker-compose up -d
+          
+          # Access the dashboard
+          open http://localhost
+          \`\`\`
+          
+          **Option 2: Individual Components**
+          \`\`\`bash
+          # Backend
+          docker run -d --name sreoob-backend -p 8000:8000 \\
+            -v sreoob-data:/data \\
+            ghcr.io/x86txt/sreoob-backend:$VERSION
+          
+          # Frontend  
+          docker run -d --name sreoob-frontend -p 3000:3000 \\
+            ghcr.io/x86txt/sreoob-frontend:$VERSION
+          
+          # Agent (Quick Install)
+          curl -fsSL https://raw.githubusercontent.com/x86txt/SREoob/main/agent/install.sh | bash
+          \`\`\`
+          
+          ## 📦 What's Included
+          
+          ### 🔧 Backend (FastAPI + Python)
+          - **Image**: \`ghcr.io/x86txt/sreoob-backend:$VERSION\`
+          - **Port**: 8000
+          - **Features**: REST API, WebSocket, SQLite, Authentication
+          
+          ### 🎨 Frontend (Next.js + TypeScript)
+          - **Image**: \`ghcr.io/x86txt/sreoob-frontend:$VERSION\`
+          - **Port**: 3000  
+          - **Features**: Modern UI, Real-time updates, Authentication
+          
+          ### 📡 Agent (Go + Cross-platform)
+          - **Platforms**: Linux (AMD64/ARM64/ARM/RISC-V), macOS (ARM64), Windows (AMD64)
+          - **Features**: Real-time monitoring, WebSocket sync, Protocol fallback
+          - **Quick Install**: One-liner script with auto-detection
+          
+          ### 🌐 Nginx Proxy
+          - **Configuration**: Production-ready reverse proxy
+          - **Features**: SSL termination, Load balancing, Static assets
+          
+          ## 🔧 What's New
+          
+          ### Changes in this release:
+          $COMMITS
+          
+          ## 🏗️ Architecture
+          
+          \`\`\`
+          ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+          │   Frontend  │────│    Nginx    │────│   Backend   │
+          │  (Next.js)  │    │   (Proxy)   │    │  (FastAPI)  │
+          │    :3000    │    │    :80      │    │    :8000    │
+          └─────────────┘    └─────────────┘    └─────────────┘
+                                                       │
+                                                       │ WebSocket/HTTP
+                                                       │
+          ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+          │   Agent 1   │────│   Agent 2   │────│   Agent N   │
+          │ (Remote VM) │    │(Raspberry Pi)│    │  (Windows)  │
+          └─────────────┘    └─────────────┘    └─────────────┘
+          \`\`\`
+          
+          ## 🔒 Security Features
+          
+          - ✅ **Authentication**: API key-based with Argon2 hashing
+          - ✅ **Anonymous Mode**: Read-only access without authentication
+          - ✅ **Agent Security**: 64-character API keys with database storage
+          - ✅ **Network Security**: WebSocket with HTTP fallback
+          - ✅ **Container Security**: Non-root users, minimal attack surface
+          
+          ## 📋 Environment Configuration
+          
+          ### Backend Environment Variables
+          | Variable | Default | Description |
+          |----------|---------|-------------|
+          | \`DATABASE_PATH\` | \`siteup.db\` | SQLite database location |
+          | \`SCAN_RANGE_MIN\` | \`30s\` | Minimum scan interval |
+          | \`SCAN_RANGE_MAX\` | \`5m\` | Maximum scan interval |
+          | \`ADMIN_API_KEY_HASH\` | - | Admin authentication hash |
+          
+          ### Agent Environment Variables
+          | Variable | Default | Description |
+          |----------|---------|-------------|
+          | \`MASTER_FQDN\` | - | Master server URL (required) |
+          | \`API_KEY\` | - | 64-character agent API key (required) |
+          | \`AGENT_PORT\` | \`8081\` | Agent communication port |
+          | \`USE_WEBSOCKET\` | \`true\` | Enable WebSocket connections |
+          
+          ## 📖 Documentation
+          
+          - [📚 Main README](https://github.com/x86txt/SREoob/blob/main/README.md)
+          - [🔧 Backend Setup](https://github.com/x86txt/SREoob/blob/main/backend/CONFIG.md)
+          - [🎨 Frontend Guide](https://github.com/x86txt/SREoob/tree/main/frontend)
+          - [📡 Agent Documentation](https://github.com/x86txt/SREoob/blob/main/agent/README.md)
+          - [🐳 Docker Deployment](https://github.com/x86txt/SREoob/blob/main/docker-compose.yml)
+          
+          ## 🚀 Production Deployment
+          
+          1. **Download the stack**: \`curl -O https://github.com/x86txt/SREoob/releases/download/$TAG/docker-compose.yml\`
+          2. **Configure environment**: Edit \`.env\` file with your settings
+          3. **Start services**: \`docker-compose up -d\`
+          4. **Deploy agents**: Use the one-liner install script on remote systems
+          5. **Configure monitoring**: Add sites and agents through the web UI
+          
+          ---
+          
+          **🎉 Ready to monitor your infrastructure with SREoob!**
+          
+          **Docker Images:**
+          - Backend: \`ghcr.io/x86txt/sreoob-backend:$VERSION\`
+          - Frontend: \`ghcr.io/x86txt/sreoob-frontend:$VERSION\`
+          
+          **Agent Binaries:** See assets below for your platform
+          **Full Documentation:** https://github.com/x86txt/SREoob
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: SREoob Full Stack ${{ needs.version.outputs.version }}
+          body_path: ./release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            ./release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release Summary
+        run: |
+          echo "🎉 Full stack release ${{ needs.version.outputs.tag }} created successfully!"
+          echo ""
+          echo "📦 Components released:"
+          echo "  🔧 Backend: ghcr.io/x86txt/sreoob-backend:${{ needs.version.outputs.version }}"
+          echo "  🎨 Frontend: ghcr.io/x86txt/sreoob-frontend:${{ needs.version.outputs.version }}"
+          echo "  📡 Agent: Cross-platform binaries included"
+          echo ""
+          echo "🚀 Quick start:"
+          echo "  curl -fsSL https://github.com/x86txt/SREoob/releases/download/${{ needs.version.outputs.tag }}/docker-compose.yml | docker-compose -f - up -d" 
