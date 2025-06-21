@@ -22,6 +22,9 @@ on:
         - minor
         - major
 
+permissions:
+  contents: write
+
 env:
   GO_VERSION: '1.21'
   AGENT_DIR: './agent'
@@ -126,7 +129,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Cache Go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
@@ -165,7 +168,7 @@ jobs:
           fi
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: ${{ env.AGENT_DIR }}/${{ matrix.name }}
@@ -181,7 +184,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: ./binaries
 
@@ -273,38 +276,26 @@ jobs:
 
       - name: Create Release
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
-          release_name: SREoob Agent ${{ needs.version.outputs.version }}
+          name: SREoob Agent ${{ needs.version.outputs.version }}
           body_path: ./release_notes.md
           draft: false
           prerelease: false
+          files: |
+            ./release-assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Release Assets
+      - name: Release Summary
         run: |
-          UPLOAD_URL="${{ steps.create_release.outputs.upload_url }}"
-          
-          # Upload each binary
-          for file in ./release-assets/*; do
-            filename=$(basename "$file")
-            echo "Uploading $filename..."
-            
-            curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                 -H "Content-Type: application/octet-stream" \
-                 --data-binary @"$file" \
-                 "${UPLOAD_URL%\{*}?name=$filename"
-          done
-
-      - name: Update installation script
-        run: |
-          # Update the demo script with the new version
-          sed -i 's/Generated API Key: .*/Generated API Key: abc123def456789a.../' agent/demo-install.sh
-          
           echo "✅ Release ${{ needs.version.outputs.tag }} created successfully!"
           echo "📦 Binaries available at: https://github.com/x86txt/SREoob/releases/tag/${{ needs.version.outputs.tag }}"
+          echo "🔗 Release URL: ${{ steps.create_release.outputs.url }}"
+          echo "📋 Release ID: ${{ steps.create_release.outputs.id }}"
 
   # Test job for pull requests
   test-build:
@@ -315,7 +306,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 

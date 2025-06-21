@@ -711,6 +711,8 @@ Each release includes:
 - ✅ **Installation instructions** and platform compatibility
 - ✅ **Version information** embedded in binaries
 - ✅ **Security hardening** with static linking and stripped symbols
+- ✅ **Modern GitHub Actions**: Uses [`softprops/action-gh-release@v2`](https://github.com/softprops/action-gh-release) for reliable releases
+- ✅ **Atomic uploads**: All assets uploaded together with proper error handling
 
 ### Using Released Binaries
 
@@ -762,6 +764,10 @@ on:
     inputs:
       version_bump: [ patch, minor, major ]
 
+# Required permissions:
+permissions:
+  contents: write
+
 # Build matrix:
 strategy:
   matrix:
@@ -772,6 +778,12 @@ strategy:
       - { goos: linux, goarch: riscv64 }
       - { goos: darwin, goarch: arm64 }
       - { goos: windows, goarch: amd64 }
+
+# Modern release action:
+- uses: softprops/action-gh-release@v2
+  with:
+    files: ./release-assets/*
+    fail_on_unmatched_files: true
 ```
 
 ---
