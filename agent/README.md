@@ -18,7 +18,7 @@ A lightweight Go-based monitoring agent that connects to a SREoob master instanc
 **Get up and running in 30 seconds:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yourusername/sreoob/main/agent/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/x86txt/sreoob/main/agent/install.sh | bash
 ```
 
 *The installer will:*
@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/yourusername/sreoob/main/agent/inst
 
 **Alternative (wget):**
 ```bash
-wget -qO- https://raw.githubusercontent.com/yourusername/sreoob/main/agent/install.sh | bash
+wget -qO- https://raw.githubusercontent.com/x86txt/sreoob/main/agent/install.sh | bash
 ```
 
 **What you'll need:**
