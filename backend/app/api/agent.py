@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 
 from ..config import Settings, get_settings
-from ..database import record_check, get_sites
+from ..database import record_check, get_sites, get_agent_by_hash, update_agent_status, add_agent, get_agents, delete_agent
 from ..monitor import get_monitor
 
 logger = logging.getLogger(__name__)
@@ -42,27 +42,37 @@ class WebSocketMessage(BaseModel):
 
 # Agent authentication dependency
 async def authenticate_agent(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    settings: Settings = Depends(get_settings)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    if not settings.AGENT_API_KEY_HASH:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Agent authentication is not configured on the server.",
-        )
+    api_key = credentials.credentials
+    api_key_hash = ph.hash(api_key)
     
-    try:
-        ph.verify(settings.AGENT_API_KEY_HASH, credentials.credentials)
-        return credentials.credentials
-    except VerifyMismatchError:
+    # Check if agent exists in database
+    agent = await get_agent_by_hash(api_key_hash)
+    if not agent:
+        # Try to verify against all stored hashes (for backward compatibility)
+        agents = await get_agents()
+        for stored_agent in agents:
+            try:
+                ph.verify(stored_agent['api_key_hash'], api_key)
+                # Update agent status to online
+                await update_agent_status(stored_agent['api_key_hash'], 'online')
+                return api_key
+            except VerifyMismatchError:
+                continue
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid agent API key.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # Update agent status to online
+    await update_agent_status(agent['api_key_hash'], 'online')
+    return api_key
 
 # Alternative authentication for WebSocket (via query param or header)
-async def authenticate_agent_websocket(websocket: WebSocket, settings: Settings) -> bool:
+async def authenticate_agent_websocket(websocket: WebSocket) -> bool:
     # Try to get API key from query parameters first
     api_key = websocket.query_params.get("api_key")
     
@@ -72,14 +82,21 @@ async def authenticate_agent_websocket(websocket: WebSocket, settings: Settings)
         if api_key and api_key.startswith("Bearer "):
             api_key = api_key[7:]  # Remove "Bearer " prefix
     
-    if not api_key or not settings.AGENT_API_KEY_HASH:
+    if not api_key:
         return False
     
-    try:
-        ph.verify(settings.AGENT_API_KEY_HASH, api_key)
-        return True
-    except VerifyMismatchError:
-        return False
+    # Check against all stored agent hashes
+    agents = await get_agents()
+    for agent in agents:
+        try:
+            ph.verify(agent['api_key_hash'], api_key)
+            # Update agent status to online
+            await update_agent_status(agent['api_key_hash'], 'online')
+            return True
+        except VerifyMismatchError:
+            continue
+    
+    return False
 
 @router.post("/agent/register")
 async def register_agent(
@@ -142,11 +159,11 @@ async def submit_check_results(
     return response
 
 @router.websocket("/agent/ws")
-async def agent_websocket_endpoint(websocket: WebSocket, settings: Settings = Depends(get_settings)):
+async def agent_websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time agent communication."""
     
     # Authenticate the WebSocket connection
-    if not await authenticate_agent_websocket(websocket, settings):
+    if not await authenticate_agent_websocket(websocket):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication failed")
         return
     

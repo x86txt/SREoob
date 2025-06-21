@@ -41,6 +41,18 @@ async def init_database():
             )
         """)
         
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS agents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                api_key_hash TEXT UNIQUE NOT NULL,
+                description TEXT,
+                last_seen TIMESTAMP,
+                status TEXT DEFAULT 'offline',  -- 'online', 'offline'
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         await db.commit()
 
 async def add_site(url: str, name: str, scan_interval: str = "60s") -> int:
@@ -119,4 +131,46 @@ async def delete_site(site_id: int):
     async with aiosqlite.connect(DATABASE_PATH) as db:
         await db.execute("DELETE FROM site_checks WHERE site_id = ?", (site_id,))
         await db.execute("DELETE FROM sites WHERE id = ?", (site_id,))
+        await db.commit()
+
+async def add_agent(name: str, api_key_hash: str, description: str = None) -> int:
+    """Add a new agent to the database."""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO agents (name, api_key_hash, description) VALUES (?, ?, ?)",
+            (name, api_key_hash, description)
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+async def get_agents() -> List[Dict[str, Any]]:
+    """Get all registered agents."""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM agents ORDER BY name")
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+async def get_agent_by_hash(api_key_hash: str) -> Dict[str, Any]:
+    """Get agent by API key hash."""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM agents WHERE api_key_hash = ?", (api_key_hash,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+async def update_agent_status(api_key_hash: str, status: str):
+    """Update agent status and last seen timestamp."""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        await db.execute("""
+            UPDATE agents 
+            SET status = ?, last_seen = CURRENT_TIMESTAMP 
+            WHERE api_key_hash = ?
+        """, (status, api_key_hash))
+        await db.commit()
+
+async def delete_agent(agent_id: int):
+    """Delete an agent."""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        await db.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
         await db.commit() 

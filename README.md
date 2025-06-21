@@ -1,8 +1,22 @@
-# 🚀 SiteUp Monitor
+# 🚀 SREoob Monitor
 
 > 📡 A simple yet powerful website uptime monitoring service built with modern tech stack!
 
-Keep your websites online and your mind at peace! 😌 Built with <svg width="20" height="20" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#009688" d="M12 .0387C5.3729.0384.0003 5.3931 0 11.9988c-.001 6.6066 5.372 11.9628 12 11.9625 6.628.0003 12.001-5.3559 12-11.9625-.0003-6.6057-5.3729-11.9604-12-11.96m-.829 5.4153h7.55l-7.5805 5.3284h5.1828L5.279 18.5436q2.9466-6.5444 5.892-13.0896"/></svg> **FastAPI** backend and <svg width="20" height="20" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#000000" d="M18.665 21.978C16.758 23.255 14.465 24 12 24 5.377 24 0 18.623 0 12S5.377 0 12 0s12 5.377 12 12c0 3.583-1.574 6.801-4.067 9.001L9.219 7.2H7.2v9.596h1.615V9.251l9.85 12.727Zm-3.332-8.533 1.6 2.061V7.2h-1.6v6.245Z"/></svg> **Next.js** frontend, SiteUp Monitor provides real-time status updates, response time tracking, and comprehensive historical data.
+Keep your websites online and your mind at peace! 😌 Built with <svg width="20" height="20" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#009688" d="M12 .0387C5.3729.0384.0003 5.3931 0 11.9988c-.001 6.6066 5.372 11.9628 12 11.9625 6.628.0003 12.001-5.3559 12-11.9625-.0003-6.6057-5.3729-11.9604-12-11.96m-.829 5.4153h7.55l-7.5805 5.3284h5.1828L5.279 18.5436q2.9466-6.5444 5.892-13.0896"/></svg> **FastAPI** backend and <svg width="20" height="20" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#000000" d="M18.665 21.978C16.758 23.255 14.465 24 12 24 5.377 24 0 18.623 0 12S5.377 0 12 0s12 5.377 12 12c0 3.583-1.574 6.801-4.067 9.001L9.219 7.2H7.2v9.596h1.615V9.251l9.85 12.727Zm-3.332-8.533 1.6 2.061V7.2h-1.6v6.245Z"/></svg> **Next.js** frontend, SREoob Monitor provides real-time status updates, response time tracking, and comprehensive historical data.
+
+## ⚡ Super Quick Agent Deployment
+
+**Deploy a monitoring agent in 30 seconds:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yourusername/sreoob/main/agent/install.sh | bash
+```
+
+✅ **Auto-detects your platform** • ✅ **Downloads pre-compiled binary** • ✅ **Generates secure API key** • ✅ **Creates systemd service** • ✅ **Provides clear next steps**
+
+> 🎯 **Perfect for:** Remote servers, VPS instances, edge locations, or any Linux/macOS/Windows system you want to monitor from.
+> 
+> 📖 **Full agent documentation:** See [`agent/README.md`](agent/README.md) for advanced configuration.
 
 ---
 

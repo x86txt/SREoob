@@ -3,7 +3,8 @@ from typing import List, Optional
 from ..models import SiteCreate, SiteStatus, SiteCheck, MonitorStats
 from ..database import (
     add_site, get_sites, get_site_status, get_site_history, 
-    delete_site as db_delete_site, DATABASE_PATH
+    delete_site as db_delete_site, DATABASE_PATH,
+    add_agent, get_agents, delete_agent
 )
 from ..monitor import get_monitor
 from ..config import Settings, get_settings
@@ -13,8 +14,10 @@ import socket
 from urllib.parse import urlparse
 from pydantic import BaseModel, constr, validator
 import re
+from argon2 import PasswordHasher
 
 router = APIRouter()
+ph = PasswordHasher()
 
 # Pydantic models
 class SiteCreate(BaseModel):
@@ -53,6 +56,17 @@ class SiteCreate(BaseModel):
 
 class ManualCheckRequest(BaseModel):
     site_ids: Optional[List[int]] = None
+
+class AgentCreate(BaseModel):
+    name: constr(min_length=1)
+    api_key: constr(min_length=64)
+    description: Optional[str] = None
+
+    @validator('api_key')
+    def validate_api_key(cls, v):
+        if len(v) < 64:
+            raise ValueError("API key must be at least 64 characters long")
+        return v
 
 @router.post("/sites", response_model=dict)
 async def create_site(site: SiteCreate):
@@ -637,4 +651,53 @@ async def get_agent_security_info(url: str, agent_port: str = "8081") -> dict:
             'http_version': None,
             'connection_status': 'error',
             'fallback_used': False
-        } 
+        }
+
+# Agent Management Endpoints
+
+@router.get("/agents", response_model=List[dict])
+async def list_agents():
+    """Get all registered agents."""
+    agents = await get_agents()
+    # Don't return the actual API key hash for security
+    return [
+        {
+            "id": agent["id"],
+            "name": agent["name"],
+            "description": agent["description"],
+            "status": agent["status"],
+            "last_seen": agent["last_seen"],
+            "created_at": agent["created_at"]
+        }
+        for agent in agents
+    ]
+
+@router.post("/agents", response_model=dict)
+async def create_agent(agent: AgentCreate):
+    """Add a new agent by hashing the provided API key."""
+    try:
+        # Hash the API key using Argon2
+        api_key_hash = ph.hash(agent.api_key)
+        
+        # Add agent to database
+        agent_id = await add_agent(agent.name, api_key_hash, agent.description)
+        
+        return {
+            "id": agent_id,
+            "message": "Agent added successfully",
+            "name": agent.name,
+            "description": agent.description
+        }
+    except Exception as e:
+        if "UNIQUE constraint failed" in str(e):
+            raise HTTPException(status_code=400, detail="An agent with this API key already exists")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/agents/{agent_id}", response_model=dict)
+async def delete_agent_endpoint(agent_id: int):
+    """Delete an agent."""
+    try:
+        await delete_agent(agent_id)
+        return {"message": "Agent deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 

@@ -5,10 +5,53 @@
 [![WebSocket](https://img.shields.io/badge/websocket-enabled-brightgreen.svg)](#real-time-synchronization)
 [![Cross Platform](https://img.shields.io/badge/platform-linux%20%7C%20windows%20%7C%20macos-lightgrey.svg)](#cross-compilation)
 
-A lightweight Go-based monitoring agent that connects to a sreoob master instance to monitor websites and services with **real-time synchronization**.
+A lightweight Go-based monitoring agent that connects to a SREoob master instance to monitor websites and services with **real-time synchronization**.
+
+**🎯 Complete Workflow:**
+1. **Deploy:** Run the one-liner installation script on any server
+2. **Register:** Copy the generated API key to your SREoob dashboard  
+3. **Monitor:** Agent automatically syncs and starts monitoring your sites
+4. **Scale:** Deploy multiple agents across different locations/networks
+
+## 🚀 Quick Start
+
+**Get up and running in 30 seconds:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yourusername/sreoob/main/agent/install.sh | bash
+```
+
+*The installer will:*
+- ✅ **Auto-detect your platform** (Linux/macOS/Windows, AMD64/ARM64)
+- ✅ **Download pre-compiled binary** from GitHub releases
+- ✅ **Generate secure API key** automatically
+- ✅ **Create configuration files** and systemd service
+- ✅ **Provide clear next steps** for dashboard registration
+
+**Alternative (wget):**
+```bash
+wget -qO- https://raw.githubusercontent.com/yourusername/sreoob/main/agent/install.sh | bash
+```
+
+**What you'll need:**
+- Your SREoob dashboard URL (e.g., `https://sreoob.example.com`)
+- A name for your agent (e.g., "Production Monitor")
+- 30 seconds of your time! ⚡
+
+**Try the demo first:**
+```bash
+./agent/demo-install.sh  # Shows what the installation looks like
+```
+
+> **💡 Want the full setup process?** See the [detailed installation guide](#-installation) below.
+> 
+> **🔧 For developers:** 
+> - Update the `GITHUB_REPO` variable in `install.sh` to point to your repository
+> - Ensure your GitHub repo has releases with pre-compiled binaries (see [Cross-compilation](#cross-compilation))
 
 ## 📋 Table of Contents
 
+- [Quick Start](#-quick-start) ⭐
 - [Features](#-features)
 - [Configuration](#-configuration)
 - [Real-time Synchronization](#-real-time-synchronization)
@@ -80,28 +123,112 @@ The agent uses multiple synchronization methods for optimal performance:
 
 ## 🔐 Generating a Secure API Key
 
-The agent requires a minimum **64-character** API key. Here's how to generate one:
+The agent requires a minimum **64-character** API key for authentication with the master server.
 
-### Linux / macOS 🐧 🍎
+> **⚠️ Important**: Generate the API key **only once** and reuse it across all agents. If you already have agents deployed, use the same base64 key for consistency.
+
+### For New Deployments 🆕
+
+If this is your **first agent** or you're starting fresh:
+
+#### Step 1: Generate API Key 🎯
+
+```bash
+# Generate key using the agent binary
+./sreoob-agent -genkey
+
+# This outputs:
+# Generated API Key: abc123...def789 (copy this key)
+# Argon2 Hash: $argon2id$v=19$m=65536,t=3,p=4$... (not needed for new workflow)
+```
+
+#### Step 2: Register Agent in Dashboard 🌐
+
+1. **Open your SREoob dashboard** in a web browser
+2. **Navigate to the Agents page** (`/agents`)
+3. **Click "Add Agent"** button
+4. **Fill in the form**:
+   - **Agent Name**: e.g., "Production Monitor", "EU West Agent"
+   - **API Key**: Paste the 64-character key from Step 1
+   - **Description**: Optional description of the agent's purpose
+5. **Click "Add Agent"** - the server will hash and store the key automatically
+
+#### Step 3: Configure and Run Agent 🚀
+
+```bash
+# Set environment variables
+export MASTER_FQDN="https://your-sreoob-master.com"
+export API_KEY="abc123...def789"  # The key from Step 1
+
+# Run the agent
+./sreoob-agent
+```
+
+#### Linux / macOS 🐧 🍎
 
 ```bash
 # Generate a 64-character random string
 API_KEY=$(openssl rand -hex 32)
 echo "Generated API Key: $API_KEY"
+echo "Save this key - use it for ALL agents!"
 ```
 
-### Windows (PowerShell) 🪟
+#### Windows (PowerShell) 🪟
 
 ```powershell
 # Generate a 64-character random string
 $API_KEY = -join ((1..64) | ForEach {'{0:X}' -f (Get-Random -Max 16)})
 Write-Host "Generated API Key: $API_KEY"
+Write-Host "Save this key - use it for ALL agents!"
 ```
 
-### Alternative (Python - Any Platform) 🐍
+#### Alternative (Python - Any Platform) 🐍
 
 ```bash
-python3 -c "import secrets; print('Generated API Key:', secrets.token_hex(32))"
+python3 -c "import secrets; print('Generated API Key:', secrets.token_hex(32)); print('Save this key - use it for ALL agents!')"
+```
+
+### For Existing Deployments 🔄
+
+If you **already have agents** registered in the dashboard:
+
+#### Option A: Use Existing Key (Recommended) ✅
+1. **Find your existing key**: Check your current agent's environment variables or config
+2. **Use the same key**: Set `API_KEY` to the same value on all new agents
+3. **No dashboard action needed**: The key is already registered
+
+#### Option B: Register New Agent 🆕
+1. **Follow the "New Deployments" process** above to generate and register a new agent
+2. **Each registered agent** can have its own unique API key
+3. **Multiple agents supported**: You can have different keys for different purposes
+
+### Key Management Best Practices 🔒
+
+- ✅ **Use the dashboard**: Register agents through the web interface for easy management
+- ✅ **One key per agent**: Each agent can have its own unique API key for better security
+- ✅ **Store securely**: Keep API keys in a secure location (password manager, vault)
+- ✅ **Monitor in dashboard**: View agent status and last-seen times in the `/agents` page
+- ✅ **Rotate when needed**: Generate new keys and update agents when required
+- ✅ **Remove unused agents**: Delete old agent registrations from the dashboard
+
+### Example Multi-Agent Setup 🌐
+
+```bash
+# Agent 1: Production Monitor
+./sreoob-agent -genkey  # Generates key1
+# Register "Production Monitor" in dashboard with key1
+export API_KEY="key1..."
+export MASTER_FQDN="https://sreoob.example.com"
+./sreoob-agent
+
+# Agent 2: Development Monitor  
+./sreoob-agent -genkey  # Generates key2
+# Register "Development Monitor" in dashboard with key2
+export API_KEY="key2..."
+export MASTER_FQDN="https://sreoob.example.com"
+./sreoob-agent
+
+# Each agent has its own unique key and identity
 ```
 
 ## 🌍 Setting Environment Variables
