@@ -1,0 +1,51 @@
+services:
+  backend:
+    image: ghcr.io/x86txt/sreoob-backend:latest
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+      - "${AGENT_SERVER_PORT:-5227}:5227"
+    volumes:
+      - sreoob-data:/data
+    environment:
+      - DATABASE_PATH=/data/sreoob.db
+      - SCAN_RANGE_MIN=${SCAN_RANGE_MIN:-30s}
+      - SCAN_RANGE_MAX=${SCAN_RANGE_MAX:-5m}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - AGENT_SERVER_PORT=${AGENT_SERVER_PORT:-5227}
+      - ADMIN_API_KEY_HASH=${ADMIN_API_KEY_HASH:-}
+    restart: ${RESTART_POLICY:-unless-stopped}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    image: ghcr.io/x86txt/sreoob-frontend:latest
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_BASE_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: ${RESTART_POLICY:-unless-stopped}
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_SSL_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: ${RESTART_POLICY:-unless-stopped}
+
+volumes:
+  sreoob-data:
+    driver: local 

@@ -16,8 +16,8 @@ NC='\033[0m' # No Color
 
 # Configuration
 GITHUB_REPO="x86txt/SREoob"
-COMPOSE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/refs/heads/main/docker-compose.yml"
-NGINX_CONFIG_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/refs/heads/main/nginx/nginx.conf"
+COMPOSE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/refs/heads/main/docker-compose.prod.yml"
+NGINX_CONFIG_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/refs/heads/main/nginx/nginx.prod.conf"
 
 # Banner
 echo -e "${PURPLE}"

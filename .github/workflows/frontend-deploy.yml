@@ -7,6 +7,7 @@ on:
       - 'frontend/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - 'docker-compose*.yml'
       - '.github/workflows/frontend-deploy.yml'
   pull_request:
     branches: [ main ]

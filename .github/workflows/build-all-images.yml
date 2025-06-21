@@ -1,0 +1,69 @@
+name: Build All Docker Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force rebuild all images'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  trigger-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Backend Build
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'backend-deploy.yml',
+              ref: 'main',
+              inputs: {
+                version_bump: 'patch'
+              }
+            });
+            console.log('✅ Backend build triggered');
+
+  trigger-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Frontend Build
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'frontend-deploy.yml',
+              ref: 'main',
+              inputs: {
+                version_bump: 'patch'
+              }
+            });
+            console.log('✅ Frontend build triggered');
+
+  summary:
+    runs-on: ubuntu-latest
+    needs: [trigger-backend, trigger-frontend]
+    steps:
+      - name: Build Summary
+        run: |
+          echo "🚀 All Docker image builds have been triggered!"
+          echo ""
+          echo "📦 Images being built:"
+          echo "  • ghcr.io/x86txt/sreoob-backend:latest"
+          echo "  • ghcr.io/x86txt/sreoob-frontend:latest"
+          echo ""
+          echo "⏱️  Builds typically take 3-5 minutes"
+          echo "🔍 Check the Actions tab for build progress"
+          echo ""
+          echo "Once builds complete, you can deploy with:"
+          echo "  docker compose -f docker-compose.prod.yml up -d" 

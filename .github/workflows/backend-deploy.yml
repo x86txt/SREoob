@@ -7,6 +7,8 @@ on:
       - 'backend/**'
       - 'pyproject.toml'
       - 'uv.lock'
+      - 'Dockerfile.backend'
+      - 'docker-compose*.yml'
       - '.github/workflows/backend-deploy.yml'
   pull_request:
     branches: [ main ]
